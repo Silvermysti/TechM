@@ -66,12 +66,16 @@ def decide(
 ) -> T:
     """Run a single structured-output call and return a parsed `schema` instance."""
     model = get_model(tier, temperature=temperature)
-    # Ollama needs the native JSON-schema grammar to guarantee parseable output;
-    # OpenAI-compatible providers use their default structured-output method.
-    if get_settings().llm_provider == "ollama":
+    # Each provider has a different reliable structured-output path:
+    #   ollama  -> native JSON-schema grammar guarantees parseable output.
+    #   groq/deepseek -> function-calling. DeepSeek has disabled the strict
+    #     `json_schema` response_format ("This response_format type is unavailable
+    #     now"), and function-calling is supported by both, so we pin it here.
+    provider = get_settings().llm_provider
+    if provider == "ollama":
         structured = model.with_structured_output(schema, method="json_schema")
     else:
-        structured = model.with_structured_output(schema)
+        structured = model.with_structured_output(schema, method="function_calling")
     result = structured.invoke(
         [SystemMessage(content=system), HumanMessage(content=user)]
     )

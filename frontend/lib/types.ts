@@ -12,6 +12,12 @@ export type AgentOutput = {
   output: Record<string, unknown>;
 };
 
+export type Attachment = {
+  id: string;
+  url: string;
+  filename: string;
+};
+
 export type Ticket = {
   id: string;
   customer_id: string | null;
@@ -25,6 +31,7 @@ export type Ticket = {
   recommendation: Recommendation | null;
   agent_trace: AgentOutput[] | null;
   human_decision: string | null;
+  attachments: Attachment[];
 };
 
 export type IntakeReply = {
@@ -32,4 +39,19 @@ export type IntakeReply = {
   reply: string;
   enough_info: boolean;
   ticket_id: string | null;
+  request_image: boolean;
+};
+
+export type Vehicle = {
+  vin: string;
+  model: string;
+  year: number;
+};
+
+export type Session = {
+  role: "customer" | "manager";
+  name: string;
+  email: string;
+  customer_id: string | null;
+  vehicles: Vehicle[];
 };

@@ -15,6 +15,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -72,6 +73,18 @@ class WarrantyPolicy(Base):
     covered_components: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class Supplier(Base):
+    """Part vendor — the counterparty for warranty cost recovery (APQC 6.7.4)."""
+
+    __tablename__ = "suppliers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    is_oem: Mapped[bool] = mapped_column(Boolean, default=False)
+    recovery_email: Mapped[str] = mapped_column(String(180), default="")
+
+
 class PartInventory(Base):
     __tablename__ = "parts_inventory"
 
@@ -81,7 +94,29 @@ class PartInventory(Base):
     component: Mapped[str] = mapped_column(String(60), default="")
     stock_qty: Mapped[int] = mapped_column(Integer, default=0)
     eta_days: Mapped[int] = mapped_column(Integer, default=0)
+    unit_price: Mapped[float] = mapped_column(Float, default=0.0)  # warranty part price
     supplier: Mapped[str] = mapped_column(String(120), default="")
+    supplier_id: Mapped[str | None] = mapped_column(
+        ForeignKey("suppliers.id"), nullable=True
+    )
+
+
+class ClaimCode(Base):
+    """Fault / labor-operation catalog: standard repair time + rate per component.
+
+    The backbone of warranty costing — every OEM keeps a coded list of repair
+    operations with a 'standard repair time' so labor cost is consistent and auditable.
+    """
+
+    __tablename__ = "claim_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(40))  # e.g. "LAB-AC-001"
+    component: Mapped[str] = mapped_column(String(60))
+    description: Mapped[str] = mapped_column(String(160), default="")
+    standard_labor_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    labor_rate: Mapped[float] = mapped_column(Float, default=0.0)  # currency / hour
+    coverage_category: Mapped[str] = mapped_column(String(40), default="general")
 
 
 class Recall(Base):
@@ -110,6 +145,7 @@ class Ticket(Base):
     status: Mapped[str] = mapped_column(String(30), default="submitted")
     apqc_process: Mapped[str | None] = mapped_column(String(10), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    component: Mapped[str | None] = mapped_column(String(60), nullable=True)
     summary: Mapped[str] = mapped_column(Text, default="")
     recommendation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     agent_trace: Mapped[list | None] = mapped_column(JSON, default=list)
@@ -120,6 +156,33 @@ class Ticket(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    attachments: Mapped[list["Attachment"]] = relationship(
+        "Attachment", back_populates="ticket", lazy="selectin"
+    )
+
+
+class Attachment(Base):
+    """Customer-uploaded evidence (photos). Uploaded during intake against a chat
+    session_id, then linked to the ticket once one is created."""
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    ticket_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tickets.id"), nullable=True, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), default="")
+    content_type: Mapped[str] = mapped_column(String(100), default="")
+    stored_name: Mapped[str] = mapped_column(String(255), default="")
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    ticket: Mapped["Ticket | None"] = relationship("Ticket", back_populates="attachments")
+
+    @property
+    def url(self) -> str:
+        return f"/uploads/{self.stored_name}"
 
 
 class AgentExecution(Base):
@@ -154,13 +217,85 @@ class AuditLog(Base):
     after_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class WarrantyClaim(Base):
+    """The financial warranty record — what a warranty system actually keeps.
+
+    One claim per approved warranty ticket. Holds the costed breakdown (labor + parts),
+    the approved amount, the status lifecycle, and supplier-recovery linkage.
+    """
+
+    __tablename__ = "warranty_claims"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    claim_number: Mapped[str] = mapped_column(String(30))  # e.g. WC-2026-000123
+    ticket_id: Mapped[str | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    vehicle_vin: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    component: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fault_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    odometer_km: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    labor_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    labor_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    labor_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    parts_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    approved_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+
+    # draft | submitted | approved | rejected | paid | closed
+    status: Mapped[str] = mapped_column(String(20), default="submitted")
+
+    supplier_id: Mapped[str | None] = mapped_column(
+        ForeignKey("suppliers.id"), nullable=True
+    )
+    supplier_recoverable: Mapped[bool] = mapped_column(Boolean, default=False)
+    recovered_amount: Mapped[float] = mapped_column(Float, default=0.0)
+
+    decided_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    lines: Mapped[list["WarrantyClaimLine"]] = relationship(
+        back_populates="claim", cascade="all, delete-orphan"
+    )
+
+
+class WarrantyClaimLine(Base):
+    """Itemized parts/labor line on a claim — how the total is actually built up."""
+
+    __tablename__ = "warranty_claim_lines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    claim_id: Mapped[str] = mapped_column(ForeignKey("warranty_claims.id"))
+    line_type: Mapped[str] = mapped_column(String(10))  # 'part' | 'labor'
+    reference: Mapped[str] = mapped_column(String(60), default="")  # SKU or op code
+    description: Mapped[str] = mapped_column(String(160), default="")
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)  # qty or hours
+    unit_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    line_total: Mapped[float] = mapped_column(Float, default=0.0)
+
+    claim: Mapped["WarrantyClaim"] = relationship(back_populates="lines")
+
+
 __all__ = [
     "Customer",
     "Vehicle",
     "WarrantyPolicy",
+    "Supplier",
     "PartInventory",
+    "ClaimCode",
     "Recall",
     "Ticket",
     "AgentExecution",
     "AuditLog",
+    "WarrantyClaim",
+    "WarrantyClaimLine",
 ]

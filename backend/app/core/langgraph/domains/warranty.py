@@ -12,14 +12,45 @@ from datetime import date
 from app.core.langgraph.state import AfterSalesState
 from app.schemas import FraudAssessment, WarrantyRecommendation
 
-FRAUD_SYSTEM = """You are a warranty fraud-detection specialist. Given the claim \
-context and the warranty validation result, estimate the probability (0..1) that this \
-claim is fraudulent or anomalous, and explain briefly."""
+FRAUD_SYSTEM = """You are a warranty fraud-detection specialist. Estimate the \
+probability (0.0-1.0) that this claim is fraudulent or anomalous.
 
-RECOMMEND_SYSTEM = """You are a warranty claims specialist. Based on the validation \
-result and fraud assessment, recommend approve, reject, or escalate. Provide your \
-confidence (0..1), concise reasoning, and a short, polite draft email to the customer \
-communicating the outcome."""
+CRITICAL DISTINCTION — fraud is NOT the same as coverage:
+- A claim being out of warranty, or for a component the policy does not cover, is a
+  COVERAGE matter, handled separately. It is NOT evidence of fraud. Do not raise the
+  fraud score for an out-of-coverage claim.
+
+Genuine fraud/anomaly signals (raise the score only for these):
+- Repeat claims for the same component in a short window (see claim history).
+- Vehicle age or mileage inconsistent with the reported failure.
+- Internal contradictions in the customer's description.
+- A history pattern flagged as repeat/abuse.
+
+Use ONLY the facts provided. Never invent prior claims, mileage, or history. If the
+claim history shows no prior claims and nothing in the description is anomalous, the
+fraud score must be LOW (<= 0.1). Give one or two sentences naming the specific signal
+you scored on (or stating that none was found)."""
+
+RECOMMEND_SYSTEM = """You are a warranty claims specialist producing a RECOMMENDATION \
+for a human reviewer (you never finalize a payout yourself). Read the validation \
+result and the fraud score and choose exactly one decision using these rules:
+
+- REJECT  — validation shows the claim is NOT covered (component excluded or warranty
+            expired) AND the fraud score is low. This is a clear, legitimate denial.
+            Do not escalate a simple out-of-coverage claim; reject it cleanly.
+- APPROVE — validation shows the claim IS covered AND the fraud score is low AND the
+            facts are consistent. Recommend approval for the reviewer to confirm.
+- ESCALATE — the fraud score is elevated, OR the facts conflict or are ambiguous, OR
+            it is a high-value or unusual failure that needs human judgement.
+
+Your reasoning MUST agree with your decision — never argue for one outcome and output
+another. Base every statement only on the provided validation and fraud facts; do not
+invent coverage terms or history.
+
+Provide: confidence (0.0-1.0, how clear-cut the call is), concise reasoning, and a
+short, polite, professional draft email to the customer conveying the outcome. The
+email must not promise payment as final — it communicates the recommended outcome,
+pending confirmation."""
 
 
 def _append_output(state: AfterSalesState, entry: dict) -> list[dict]:
@@ -53,22 +84,44 @@ def warranty_validate(state: AfterSalesState) -> dict:
 
 
 def warranty_fraud(state: AfterSalesState) -> dict:
+    from app.db.session import SessionLocal
     from app.services import llm
+    from app.tools.claim_history import get_claim_history
+
+    vin = state.get("vehicle_vin")
+    customer_id = state.get("customer_id")
+    component = state.get("component")
+    ticket_id = state.get("request_id")
+
+    db = SessionLocal()
+    try:
+        history = get_claim_history(
+            db, vin=vin, customer_id=customer_id,
+            component=component, exclude_ticket_id=ticket_id,
+        )
+    finally:
+        db.close()
 
     context = state.get("context") or {}
     user = (
         f"Claim summary: {state.get('summary')}\n"
         f"Validation: {context.get('warranty')}\n"
-        f"VIN: {state.get('vehicle_vin')}"
+        f"VIN: {vin}\n"
+        f"Claim history: {history['summary']}"
     )
     assessment: FraudAssessment = llm.decide(
         FraudAssessment, system=FRAUD_SYSTEM, user=user, tier="complex"
     )
+
+    updated_context = dict(context)
+    updated_context["claim_history"] = history
+
     return {
         "fraud_risk": assessment.fraud_risk,
+        "context": updated_context,
         "agent_outputs": _append_output(
             state, {"agent": "Fraud Detection Specialist", "apqc": "6.7.5.5",
-                    "output": assessment.model_dump()}
+                    "output": {**assessment.model_dump(), "claim_history": history}}
         ),
     }
 

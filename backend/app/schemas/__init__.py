@@ -37,6 +37,13 @@ class IntakeDecision(BaseModel):
     apqc_process: str | None = Field(None, description="APQC ref, e.g. 6.7.3")
     summary: str | None = Field(None, description="one-line summary of the issue")
     extracted: ExtractedFields = Field(default_factory=ExtractedFields)
+    request_image: bool = Field(
+        False,
+        description=(
+            "true when the issue would be visible in a photograph and the customer "
+            "has not attached one yet"
+        ),
+    )
 
 
 class FraudAssessment(BaseModel):
@@ -54,6 +61,28 @@ class WarrantyRecommendation(BaseModel):
 # --------------------------------------------------------------------------- #
 # API contracts
 # --------------------------------------------------------------------------- #
+class LoginRequest(BaseModel):
+    email: str
+
+
+class VehicleOut(BaseModel):
+    vin: str
+    model: str
+    year: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LoginResponse(BaseModel):
+    """Lightweight demo identity — captured so actions are attributable in the audit log."""
+
+    role: Literal["customer", "manager"]
+    name: str
+    email: str
+    customer_id: str | None = None
+    vehicles: list[VehicleOut] = Field(default_factory=list)
+
+
 class IntakeMessage(BaseModel):
     session_id: str
     message: str
@@ -61,6 +90,8 @@ class IntakeMessage(BaseModel):
     # Optional category the customer picked in the portal (warranty/recall/parts/
     # service/...). Used as a strong domain hint so routing is deterministic.
     category: str | None = None
+    # Evidence photos already uploaded for this chat session (attachment ids).
+    attachment_ids: list[str] = []
 
 
 class IntakeReply(BaseModel):
@@ -68,6 +99,16 @@ class IntakeReply(BaseModel):
     reply: str
     enough_info: bool
     ticket_id: str | None = None
+    # true when the agent is asking the customer to attach a photo of the issue
+    request_image: bool = False
+
+
+class AttachmentOut(BaseModel):
+    id: str
+    url: str
+    filename: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DecisionRequest(BaseModel):
@@ -88,5 +129,6 @@ class TicketOut(BaseModel):
     recommendation: dict | None = None
     agent_trace: list | None = None
     human_decision: str | None = None
+    attachments: list[AttachmentOut] = []
 
     model_config = ConfigDict(from_attributes=True)

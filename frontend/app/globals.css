@@ -1,24 +1,231 @@
 @import "tailwindcss";
 
-:root {
-  --background: #0b1220; /* command-center navy */
-  --foreground: #e6edf6;
-}
+/* ============================================================================
+   Tech Mahindra — After-Sales AI Command Center
+   Design system: semantic tokens, dual theme (dark default / light),
+   "operations control room" aesthetic — blueprint grid, brand-red accents.
+   ========================================================================== */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-archivo), "Archivo", system-ui, sans-serif;
+  --font-sans: var(--font-hanken), "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), "JetBrains Mono", ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-techm: var(--techm);
+  --color-techm-deep: var(--techm-deep);
+  --color-techm-soft: var(--techm-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+/* ---- Dark (default / command center) ---- */
+:root,
+[data-theme="dark"] {
+  --bg: #0a0c11;
+  --surface: #14171f;
+  --raised: #1b1f29;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #e9ebf1;
+  --muted: #99a1b0;
+  --faint: #646c7d;
+  --techm: #e31937;
+  --techm-deep: #b3142b;
+  --techm-soft: rgba(227, 25, 55, 0.14);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+
+  --grid: rgba(255, 255, 255, 0.022);
+  --glow: rgba(227, 25, 55, 0.12);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.8);
+  --scroll: rgba(255, 255, 255, 0.16);
+}
+
+/* ---- Light (enterprise paper) ---- */
+[data-theme="light"] {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --raised: #f6f8fb;
+  --line: rgba(15, 23, 42, 0.1);
+  --line-strong: rgba(15, 23, 42, 0.18);
+  --ink: #111722;
+  --muted: #545d6c;
+  --faint: #8b93a1;
+  --techm: #d4112f;
+  --techm-deep: #a50f26;
+  --techm-soft: rgba(212, 17, 47, 0.08);
+  --ok: #059669;
+  --ok-soft: rgba(5, 150, 105, 0.1);
+  --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.1);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.09);
+
+  --grid: rgba(15, 23, 42, 0.035);
+  --glow: rgba(212, 17, 47, 0.07);
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 32px -24px rgba(15, 23, 42, 0.3);
+  --scroll: rgba(15, 23, 42, 0.2);
+}
+
+html {
+  background-color: var(--bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(820px 460px at 100% -8%, var(--glow), transparent 60%),
+    radial-gradient(680px 420px at -6% 4%, var(--glow), transparent 58%),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: auto, auto, 56px 56px, 56px 56px;
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: var(--techm);
+  color: #fff;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: var(--scroll) transparent;
+}
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 9999px; }
+
+/* ---- Brand mark: a sharp red notch, not a glowing dot ---- */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.mark-glyph {
+  position: relative;
+  height: 0.95rem;
+  width: 0.95rem;
+  flex: none;
+  background: var(--techm);
+  clip-path: polygon(0 0, 100% 0, 100% 65%, 65% 100%, 0 100%);
+}
+.mark-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: 0 0 18px -2px var(--techm);
+  opacity: 0.55;
+  clip-path: inherit;
+}
+
+/* ---- Reusable surfaces ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.field {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 0.75rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder { color: var(--faint); }
+.field:focus {
+  border-color: var(--techm);
+  box-shadow: 0 0 0 3px var(--techm-soft);
+}
+
+/* eyebrow / section label */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* page entrance */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* small mono status pill */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 0.1rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* command-center corner brackets (drawn just outside the element) */
+.frame { position: relative; }
+.frame::before,
+.frame::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 0 solid var(--techm);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.frame::before { top: -5px; left: -5px; border-top-width: 2px; border-left-width: 2px; }
+.frame::after { bottom: -5px; right: -5px; border-bottom-width: 2px; border-right-width: 2px; }
+
+/* brand panel (login) — always TechM red, theme-independent */
+.brand-panel {
+  background:
+    radial-gradient(640px 420px at 85% -10%, rgba(255, 255, 255, 0.14), transparent 60%),
+    radial-gradient(520px 480px at -10% 110%, rgba(0, 0, 0, 0.32), transparent 62%),
+    linear-gradient(160deg, #e31837 0%, #b3142b 58%, #8f0f22 100%);
+}
+.brand-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
 }

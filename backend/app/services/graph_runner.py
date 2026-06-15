@@ -11,11 +11,26 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.langgraph.orchestrator import resume_run, start_run
-from app.models import AuditLog, Ticket
+from app.models import AgentExecution, AuditLog, Ticket
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _log_executions(db: Session, ticket_id: str, outputs: list | None) -> None:
+    """Persist one agent_executions row per specialist that ran (the AI run log)."""
+    for entry in outputs or []:
+        out = entry.get("output") if isinstance(entry, dict) else None
+        confidence = out.get("confidence") if isinstance(out, dict) else None
+        db.add(AgentExecution(
+            ticket_id=ticket_id,
+            agent_name=entry.get("agent", "unknown") if isinstance(entry, dict) else "unknown",
+            apqc_ref=entry.get("apqc") if isinstance(entry, dict) else None,
+            output=out,
+            confidence=confidence,
+            completed_at=_now(),
+        ))
 
 
 def _audit(db: Session, *, actor_type: str, actor_id: str, action: str,
@@ -36,8 +51,8 @@ def start_ticket(
 ) -> Ticket:
     """Create a ticket and run the orchestrator until it pauses for approval."""
     ticket = Ticket(
-        vehicle_vin=vin, domain=domain, classification=domain, summary=summary,
-        apqc_process=apqc, status="under_review",
+        vehicle_vin=vin, component=component, domain=domain, classification=domain,
+        summary=summary, apqc_process=apqc, status="under_review",
     )
     db.add(ticket)
     db.commit()
@@ -60,6 +75,7 @@ def start_ticket(
     ticket.customer_id = values.get("customer_id")
     ticket.thread_id = ticket.id
     ticket.status = "awaiting_approval" if result["interrupted"] else "resolved"
+    _log_executions(db, ticket.id, values.get("agent_outputs"))
     _audit(db, actor_type="agent", actor_id="orchestrator", action="created+analyzed",
            resource_id=ticket.id, after={"status": ticket.status})
     db.commit()
@@ -83,6 +99,17 @@ def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> 
         rec = dict(ticket.recommendation)
         rec["final_decision"] = decision
         ticket.recommendation = rec
+
+    # An approved warranty claim becomes a costed financial record (parts + labor).
+    # Guarded so a costing hiccup can never block the human decision itself.
+    if decision == "approve" and (ticket.domain or "") == "warranty":
+        try:
+            from app.tools.cost_estimate import build_warranty_claim
+
+            build_warranty_claim(db, ticket, decided_by=actor, status="approved")
+        except Exception:  # noqa: BLE001 — costing is supplementary to the decision
+            pass
+
     _audit(db, actor_type="human", actor_id=actor, action=f"decision:{decision}",
            resource_id=ticket.id, after={"status": ticket.status})
     db.commit()

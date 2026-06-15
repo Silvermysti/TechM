@@ -16,9 +16,11 @@ from datetime import date, timedelta
 
 from app.db.session import Base, SessionLocal, engine
 from app.models import (
+    ClaimCode,
     Customer,
     PartInventory,
     Recall,
+    Supplier,
     Vehicle,
     WarrantyPolicy,
 )
@@ -44,13 +46,35 @@ MODELS = [
     ("Tata Nexon", 2023, ["ac", "battery", "engine", "electrical"], 36),
 ]
 
+# Part vendors — the counterparty for warranty cost recovery.
+# (code, name, is_oem, recovery_email)
+SUPPLIERS = [
+    ("OEM-001", "OEM Parts Co.", True, "warranty@oemparts.example"),
+    ("BSH-001", "Bosch India", False, "recovery@bosch.example"),
+    ("CNT-001", "Continental Auto", False, "claims@continental.example"),
+    ("EXD-001", "Exide Industries", False, "warranty@exide.example"),
+]
+
+# (name, component, stock_qty, eta_days, unit_price_INR, supplier_code)
 COMPONENTS_FOR_PARTS = [
-    ("AC Compressor", "ac", 2, 1),
-    ("Brake Pad Set", "brakes", 0, 3),
-    ("Alternator", "electrical", 4, 1),
-    ("Infotainment Unit", "infotainment", 1, 5),
-    ("Transmission Kit", "transmission", 0, 7),
-    ("Battery Pack", "battery", 3, 2),
+    ("AC Compressor", "ac", 2, 1, 28000, "CNT-001"),
+    ("Brake Pad Set", "brakes", 0, 3, 4500, "BSH-001"),
+    ("Alternator", "electrical", 4, 1, 9500, "BSH-001"),
+    ("Infotainment Unit", "infotainment", 1, 5, 22000, "CNT-001"),
+    ("Transmission Kit", "transmission", 0, 7, 65000, "OEM-001"),
+    ("Battery Pack", "battery", 3, 2, 18000, "EXD-001"),
+]
+
+# Fault / labor-operation catalog: standard repair time + rate per component.
+# (code, component, description, standard_labor_hours, labor_rate_INR, coverage_category)
+CLAIM_CODES = [
+    ("LAB-AC-001", "ac", "AC compressor remove & replace", 2.5, 850, "comfort"),
+    ("LAB-BRK-001", "brakes", "Front brake caliper & pad replace", 1.8, 850, "safety"),
+    ("LAB-ENG-001", "engine", "Engine diagnostic & repair", 4.0, 950, "powertrain"),
+    ("LAB-TRN-001", "transmission", "Transmission overhaul", 7.5, 950, "powertrain"),
+    ("LAB-ELE-001", "electrical", "Alternator replace", 1.5, 800, "electrical"),
+    ("LAB-INF-001", "infotainment", "Infotainment unit replace", 1.2, 800, "comfort"),
+    ("LAB-BAT-001", "battery", "Battery pack replace", 1.0, 800, "electrical"),
 ]
 
 
@@ -72,11 +96,29 @@ def seed() -> None:
             db.add(WarrantyPolicy(model=model, duration_months=months,
                                   covered_components=comps))
 
-        # Parts inventory
-        for name, comp, qty, eta in COMPONENTS_FOR_PARTS:
+        # Suppliers (cost-recovery counterparties)
+        suppliers_by_code = {}
+        supplier_names = {}
+        for code, name, is_oem, email in SUPPLIERS:
+            sup = Supplier(code=code, name=name, is_oem=is_oem, recovery_email=email)
+            db.add(sup)
+            db.flush()
+            suppliers_by_code[code] = sup.id
+            supplier_names[code] = name
+
+        # Claim / labor-operation codes (standard repair times)
+        for code, comp, desc, hours, rate, cat in CLAIM_CODES:
+            db.add(ClaimCode(code=code, component=comp, description=desc,
+                             standard_labor_hours=hours, labor_rate=rate,
+                             coverage_category=cat))
+
+        # Parts inventory (with price + supplier link)
+        for name, comp, qty, eta, price, sup_code in COMPONENTS_FOR_PARTS:
             db.add(PartInventory(part_name=name, sku=f"SKU-{comp.upper()}-{qty}{eta}",
                                  component=comp, stock_qty=qty, eta_days=eta,
-                                 supplier="OEM Parts Co."))
+                                 unit_price=price,
+                                 supplier=supplier_names.get(sup_code, ""),
+                                 supplier_id=suppliers_by_code.get(sup_code)))
 
         # Customers + vehicles
         today = date.today()
@@ -130,7 +172,9 @@ def seed() -> None:
         n_cust = db.query(Customer).count()
         n_veh = db.query(Vehicle).count()
         print(f"Seeded: {n_cust} customers, {n_veh} vehicles, "
-              f"{len(MODELS)} policies, {len(COMPONENTS_FOR_PARTS)} parts, 1 recall.")
+              f"{len(MODELS)} policies, {len(SUPPLIERS)} suppliers, "
+              f"{len(CLAIM_CODES)} claim codes, {len(COMPONENTS_FOR_PARTS)} parts, "
+              f"1 recall.")
     finally:
         db.close()
 

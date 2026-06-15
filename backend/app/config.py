@@ -29,7 +29,10 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "deepseek": {
         "fast": "deepseek-chat",
         "standard": "deepseek-chat",
-        "complex": "deepseek-reasoner",
+        # deepseek-reasoner ("thinking mode") rejects forced tool_choice, which
+        # our function-calling structured output requires, so the chat model is
+        # used for the complex tier too. Override via MODEL_COMPLEX if needed.
+        "complex": "deepseek-chat",
     },
 }
 

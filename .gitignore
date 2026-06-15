@@ -16,3 +16,6 @@ pgdata/
 # Editor
 .vscode/
 .idea/
+
+# Customer-uploaded evidence photos
+backend/uploads/
