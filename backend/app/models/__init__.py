@@ -165,6 +165,8 @@ class Ticket(Base):
     human_decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
     human_actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    claim_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

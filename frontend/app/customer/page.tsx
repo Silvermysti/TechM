@@ -102,14 +102,22 @@ function StatusTracker({ ticketId }: { ticketId: string }) {
 
       {["resolved", "rejected", "escalated"].includes(status) &&
         ticket?.recommendation && (
-          <div className="mt-6 rounded-xl border border-line bg-raised p-4">
+          <div className="mt-6 rounded-xl border border-line bg-raised p-4 space-y-3">
             <p className="text-sm font-medium text-ink">
               Outcome:{" "}
               <span className="font-semibold capitalize text-techm">
                 {ticket.human_decision ?? status}
               </span>
             </p>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
+            {ticket.claim_number && (
+              <div className="flex items-center gap-3 rounded-lg border border-ok/30 bg-ok-soft px-4 py-2.5">
+                <span className="text-xs font-mono text-ok font-semibold">CLAIM REF</span>
+                <span className="font-mono text-sm font-bold text-ink tracking-wider">
+                  {ticket.claim_number}
+                </span>
+              </div>
+            )}
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted">
               {ticket.recommendation.draft_email || ticket.recommendation.reasoning}
             </p>
           </div>

@@ -31,7 +31,51 @@ export type Ticket = {
   recommendation: Recommendation | null;
   agent_trace: AgentOutput[] | null;
   human_decision: string | null;
+  claim_number: string | null;
+  claim_id: string | null;
   attachments: Attachment[];
+};
+
+export type ClaimLine = {
+  id: string;
+  line_type: string;
+  reference: string;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  line_total: number;
+};
+
+export type Claim = {
+  id: string;
+  claim_number: string;
+  ticket_id: string | null;
+  vehicle_vin: string | null;
+  component: string | null;
+  fault_code: string | null;
+  labor_hours: number;
+  labor_cost: number;
+  parts_cost: number;
+  total_cost: number;
+  approved_amount: number | null;
+  currency: string;
+  status: string;
+  supplier_recoverable: boolean;
+  decided_by: string | null;
+  submitted_at: string;
+  paid_at: string | null;
+  lines: ClaimLine[];
+};
+
+export type AuditEntry = {
+  id: string;
+  timestamp: string;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  after_state: Record<string, unknown> | null;
 };
 
 export type IntakeReply = {

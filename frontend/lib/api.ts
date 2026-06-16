@@ -1,4 +1,4 @@
-import type { Attachment, IntakeReply, Session, Ticket } from "./types";
+import type { AuditEntry, Attachment, Claim, IntakeReply, Session, Ticket } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -73,4 +73,34 @@ export function decideTicket(
     method: "POST",
     body: JSON.stringify({ decision, actor }),
   });
+}
+
+export function listClaims(): Promise<Claim[]> {
+  return jsonFetch<Claim[]>("/api/v1/claims");
+}
+
+export function getClaim(id: string): Promise<Claim> {
+  return jsonFetch<Claim>(`/api/v1/claims/${id}`);
+}
+
+export function payClaim(id: string): Promise<Claim> {
+  return jsonFetch<Claim>(`/api/v1/claims/${id}/pay`, { method: "POST" });
+}
+
+export function closeClaim(id: string): Promise<Claim> {
+  return jsonFetch<Claim>(`/api/v1/claims/${id}/close`, { method: "POST" });
+}
+
+export function listAudit(params?: {
+  ticket_id?: string;
+  actor_type?: string;
+  action?: string;
+  limit?: number;
+}): Promise<AuditEntry[]> {
+  const q = new URLSearchParams();
+  if (params?.ticket_id) q.set("ticket_id", params.ticket_id);
+  if (params?.actor_type) q.set("actor_type", params.actor_type);
+  if (params?.action) q.set("action", params.action);
+  if (params?.limit) q.set("limit", String(params.limit));
+  return jsonFetch<AuditEntry[]>(`/api/v1/audit${q.size ? `?${q}` : ""}`);
 }

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.langgraph.orchestrator import resume_run, start_run
-from app.models import AgentExecution, AuditLog, Ticket
+from app.models import AgentExecution, AuditLog, Customer, Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +43,43 @@ def _audit(db: Session, *, actor_type: str, actor_id: str, action: str,
 
 
 def _record_warranty_claim(db: Session, ticket: Ticket, *, decided_by: str) -> None:
-    """Turn an approved warranty ticket into a costed claim. Guarded so a costing
-    hiccup can never block/again undo the decision itself."""
+    """Turn an approved warranty ticket into a costed claim and notify the customer."""
     if (ticket.domain or "") != "warranty":
         return
     try:
         from app.tools.cost_estimate import build_warranty_claim
 
-        build_warranty_claim(db, ticket, decided_by=decided_by, status="approved")
+        claim = build_warranty_claim(db, ticket, decided_by=decided_by, status="approved")
+        # Stamp claim reference on the ticket so the customer portal can show it.
+        ticket.claim_number = claim.claim_number
+        ticket.claim_id = claim.id
+        _notify_customer(db, ticket=ticket, claim_number=claim.claim_number,
+                         total_cost=claim.total_cost, currency=claim.currency,
+                         decision="approve")
     except Exception:  # noqa: BLE001 — costing is supplementary to the decision
         logger.exception("warranty claim costing failed for ticket %s", ticket.id)
+
+
+def _notify_customer(
+    db: Session, *, ticket: Ticket, claim_number: str, total_cost: float,
+    currency: str, decision: str,
+) -> None:
+    try:
+        from app.services.notify import send_claim_notification
+
+        customer = db.get(Customer, ticket.customer_id) if ticket.customer_id else None
+        send_claim_notification(
+            customer_name=customer.name if customer else "Customer",
+            customer_email=customer.email if customer else "",
+            claim_number=claim_number,
+            ticket_id=ticket.id,
+            decision=decision,
+            component=ticket.component,
+            total_cost=total_cost,
+            currency=currency,
+        )
+    except Exception:
+        logger.exception("notification failed for ticket %s", ticket.id)
 
 
 def start_ticket(

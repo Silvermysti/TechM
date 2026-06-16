@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import auth, intake, tickets
+from app.api.v1 import audit, auth, claims, intake, tickets
 from app.api.v1.intake import UPLOAD_DIR
 from app.config import get_settings
 from app.db.session import create_all
@@ -34,6 +34,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(intake.router)
 app.include_router(tickets.router)
+app.include_router(claims.router)
+app.include_router(audit.router)
 
 # Customer evidence photos (uploaded during intake).
 UPLOAD_DIR.mkdir(exist_ok=True)

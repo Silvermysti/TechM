@@ -2,9 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { API_BASE, decideTicket, listTickets } from "@/lib/api";
+import {
+  API_BASE,
+  closeClaim,
+  decideTicket,
+  getClaim,
+  listAudit,
+  listTickets,
+  payClaim,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { AgentOutput, Ticket } from "@/lib/types";
+import type { AgentOutput, AuditEntry, Claim, Ticket } from "@/lib/types";
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -38,7 +46,13 @@ const STATUS_CHIPS: Record<string, string> = {
   awaiting_approval: "border-techm/40 text-techm",
 };
 
-/** A 0..1 score rendered as a mini meter + percentage. */
+const CLAIM_STATUS_CHIPS: Record<string, string> = {
+  approved: "border-ok/40 bg-ok-soft text-ok",
+  paid: "border-techm/40 bg-techm-soft text-techm",
+  closed: "border-line text-faint",
+  rejected: "border-danger/40 bg-danger-soft text-danger",
+};
+
 function ScoreBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const tone = value >= 0.6 ? "bg-danger" : value >= 0.3 ? "bg-warn" : "bg-ok";
@@ -52,7 +66,6 @@ function ScoreBar({ value }: { value: number }) {
   );
 }
 
-/** Render one field of an agent's structured output, by type. */
 function FieldValue({ name, value }: { name: string; value: unknown }) {
   if (value === null || value === undefined || value === "") {
     return <span className="text-faint">—</span>;
@@ -130,13 +143,95 @@ function ReasoningChain({ trace }: { trace: AgentOutput[] }) {
   );
 }
 
+function ClaimPanel({ claimId, onUpdate }: { claimId: string; onUpdate: () => void }) {
+  const [claim, setClaim] = useState<Claim | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getClaim(claimId).then(setClaim).catch(() => null);
+  }, [claimId]);
+
+  const act = async (fn: () => Promise<Claim>) => {
+    setBusy(true);
+    try {
+      const updated = await fn();
+      setClaim(updated);
+      onUpdate();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!claim) return null;
+
+  return (
+    <div className="mt-5 rounded-xl border border-ok/30 bg-ok-soft/40 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="eyebrow text-ok">Warranty Claim</p>
+          <p className="mt-0.5 font-mono text-[1.05rem] font-bold tracking-wider text-ink">
+            {claim.claim_number}
+          </p>
+        </div>
+        <span className={`chip ${CLAIM_STATUS_CHIPS[claim.status] ?? "border-line text-muted"}`}>
+          {claim.status}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg border border-line bg-surface px-3 py-2">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-faint">Labor</p>
+          <p className="mt-0.5 font-mono text-sm font-semibold text-ink">
+            ₹{claim.labor_cost.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-lg border border-line bg-surface px-3 py-2">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-faint">Parts</p>
+          <p className="mt-0.5 font-mono text-sm font-semibold text-ink">
+            ₹{claim.parts_cost.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-lg border border-techm/30 bg-techm-soft px-3 py-2">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-techm/70">Total</p>
+          <p className="mt-0.5 font-mono text-sm font-bold text-techm">
+            ₹{claim.total_cost.toLocaleString()}
+          </p>
+        </div>
+      </div>
+
+      {(claim.status === "approved" || claim.status === "paid") && (
+        <div className="mt-3 flex gap-2">
+          {claim.status === "approved" && (
+            <button
+              onClick={() => act(() => payClaim(claim.id))}
+              disabled={busy}
+              className="flex-1 rounded-lg bg-techm px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              Mark Paid
+            </button>
+          )}
+          <button
+            onClick={() => act(() => closeClaim(claim.id))}
+            disabled={busy}
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-xs font-medium text-muted transition hover:border-line-strong disabled:opacity-50"
+          >
+            Close Claim
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DetailPanel({
   ticket,
   onDecide,
+  onClaimUpdate,
   busy,
 }: {
   ticket: Ticket;
   onDecide: (d: "approve" | "reject" | "escalate") => void;
+  onClaimUpdate: () => void;
   busy: boolean;
 }) {
   const rec = ticket.recommendation;
@@ -177,6 +272,10 @@ function DetailPanel({
             </>
           )}
         </div>
+      )}
+
+      {ticket.claim_id && (
+        <ClaimPanel claimId={ticket.claim_id} onUpdate={onClaimUpdate} />
       )}
 
       {ticket.attachments && ticket.attachments.length > 0 && (
@@ -251,11 +350,85 @@ function DetailPanel({
   );
 }
 
+function AuditLog() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [filter, setFilter] = useState<"all" | "human" | "agent">("all");
+
+  useEffect(() => {
+    listAudit({ limit: 100, actor_type: filter === "all" ? undefined : filter })
+      .then(setEntries)
+      .catch(() => null);
+  }, [filter]);
+
+  const fmt = (ts: string) =>
+    new Date(ts).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        {(["all", "human", "agent"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              filter === f
+                ? "bg-techm text-white"
+                : "border border-line text-muted hover:border-line-strong"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        {entries.length === 0 ? (
+          <p className="p-4 text-sm text-faint">No audit entries yet.</p>
+        ) : (
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-line bg-raised">
+                <th className="px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-faint">Time</th>
+                <th className="px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-faint">Actor</th>
+                <th className="px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-faint">Action</th>
+                <th className="px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-faint">Resource</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id} className="border-b border-line last:border-0 hover:bg-raised">
+                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-faint">
+                    {fmt(e.timestamp)}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`chip text-[10px] ${
+                      e.actor_type === "human"
+                        ? "border-techm/30 text-techm"
+                        : "border-line text-faint"
+                    }`}>
+                      {e.actor_type}
+                    </span>
+                    <span className="ml-2 truncate text-muted">{e.actor_id.split(":").pop()}</span>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-ink">{e.action}</td>
+                  <td className="px-4 py-2.5 font-mono text-faint">
+                    {e.resource_id ? `#${e.resource_id.slice(0, 8)}` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ManagerPortal() {
   const { session, ready } = useAuth(["manager"]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"queue" | "audit">("queue");
 
   const refresh = useCallback(async () => {
     try {
@@ -317,85 +490,112 @@ export default function ManagerPortal() {
           <Kpi label="Avg AI confidence" value={`${avgConf}%`} />
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
-          <div>
-            <h2 className="eyebrow mb-2.5">Approval queue ({queue.length})</h2>
-            <div className="space-y-2">
-              {queue.length === 0 && (
-                <p className="card p-4 text-sm text-faint">
-                  Nothing awaiting approval. Submit a request from the Customer Portal.
-                </p>
-              )}
-              {queue.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setSelectedId(t.id)}
-                  className={`card w-full px-4 py-3 text-left transition ${
-                    selectedId === t.id
-                      ? "border-techm ring-1 ring-techm"
-                      : "hover:border-line-strong"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium text-ink">
-                      {t.summary}
-                    </span>
-                    {t.recommendation && (
-                      <span
-                        className={`whitespace-nowrap font-mono text-[10px] font-semibold uppercase tracking-wider ${
-                          DECISION_COLORS[t.recommendation.decision] ?? "text-muted"
-                        }`}
-                      >
-                        {t.recommendation.decision}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 font-mono text-[11px] text-faint">
-                    {t.domain} · #{t.id.slice(0, 8)}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <h2 className="eyebrow mb-2.5 mt-6">Decision history ({done.length})</h2>
-            <div className="card overflow-hidden">
-              {done.length === 0 ? (
-                <p className="p-4 text-sm text-faint">No decisions yet.</p>
-              ) : (
-                <table className="w-full text-left text-sm">
-                  <tbody>
-                    {done.slice(0, 10).map((t) => (
-                      <tr
-                        key={t.id}
-                        onClick={() => setSelectedId(t.id)}
-                        className="cursor-pointer border-b border-line transition last:border-0 hover:bg-raised"
-                      >
-                        <td className="max-w-0 truncate px-4 py-2.5 text-ink">
-                          {t.summary}
-                        </td>
-                        <td className="w-px whitespace-nowrap px-4 py-2.5">
-                          <span className={`chip ${STATUS_CHIPS[t.status] ?? ""}`}>
-                            {t.human_decision ?? t.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-
-          <div>
-            {selected ? (
-              <DetailPanel ticket={selected} onDecide={decide} busy={busy} />
-            ) : (
-              <div className="flex h-full min-h-72 items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-sm text-faint">
-                Select a ticket to review the AI reasoning and decide.
-              </div>
-            )}
-          </div>
+        <div className="mt-5 flex gap-1 border-b border-line">
+          {(["queue", "audit"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2.5 text-sm font-medium transition ${
+                tab === t
+                  ? "border-b-2 border-techm text-techm"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              {t === "queue" ? "Approval Queue" : "Audit Log"}
+            </button>
+          ))}
         </div>
+
+        {tab === "audit" ? (
+          <div className="mt-5">
+            <AuditLog />
+          </div>
+        ) : (
+          <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
+            <div>
+              <h2 className="eyebrow mb-2.5">Approval queue ({queue.length})</h2>
+              <div className="space-y-2">
+                {queue.length === 0 && (
+                  <p className="card p-4 text-sm text-faint">
+                    Nothing awaiting approval. Submit a request from the Customer Portal.
+                  </p>
+                )}
+                {queue.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedId(t.id)}
+                    className={`card w-full px-4 py-3 text-left transition ${
+                      selectedId === t.id
+                        ? "border-techm ring-1 ring-techm"
+                        : "hover:border-line-strong"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-ink">
+                        {t.summary}
+                      </span>
+                      {t.recommendation && (
+                        <span
+                          className={`whitespace-nowrap font-mono text-[10px] font-semibold uppercase tracking-wider ${
+                            DECISION_COLORS[t.recommendation.decision] ?? "text-muted"
+                          }`}
+                        >
+                          {t.recommendation.decision}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-faint">
+                      {t.domain} · #{t.id.slice(0, 8)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              <h2 className="eyebrow mb-2.5 mt-6">Decision history ({done.length})</h2>
+              <div className="card overflow-hidden">
+                {done.length === 0 ? (
+                  <p className="p-4 text-sm text-faint">No decisions yet.</p>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <tbody>
+                      {done.slice(0, 10).map((t) => (
+                        <tr
+                          key={t.id}
+                          onClick={() => setSelectedId(t.id)}
+                          className="cursor-pointer border-b border-line transition last:border-0 hover:bg-raised"
+                        >
+                          <td className="max-w-0 truncate px-4 py-2.5 text-ink">
+                            {t.summary}
+                          </td>
+                          <td className="w-px whitespace-nowrap px-4 py-2.5">
+                            <span className={`chip ${STATUS_CHIPS[t.status] ?? ""}`}>
+                              {t.human_decision ?? t.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div>
+              {selected ? (
+                <DetailPanel
+                  ticket={selected}
+                  onDecide={decide}
+                  onClaimUpdate={refresh}
+                  busy={busy}
+                />
+              ) : (
+                <div className="flex h-full min-h-72 items-center justify-center rounded-2xl border border-dashed border-line p-10 text-center text-sm text-faint">
+                  Select a ticket to review the AI reasoning and decide.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </Shell>
   );

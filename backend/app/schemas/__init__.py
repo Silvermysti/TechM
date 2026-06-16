@@ -6,6 +6,7 @@ is constrained to return exactly these shapes.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -141,6 +142,66 @@ class TicketOut(BaseModel):
     recommendation: dict | None = None
     agent_trace: list | None = None
     human_decision: str | None = None
+    claim_number: str | None = None
+    claim_id: str | None = None
     attachments: list[AttachmentOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------------------------------- #
+# Warranty claim read schemas
+# --------------------------------------------------------------------------- #
+class ClaimLineOut(BaseModel):
+    id: str
+    line_type: str
+    reference: str
+    description: str
+    quantity: float
+    unit_cost: float
+    line_total: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WarrantyClaimOut(BaseModel):
+    id: str
+    claim_number: str
+    ticket_id: str | None = None
+    vehicle_vin: str | None = None
+    customer_id: str | None = None
+    component: str | None = None
+    fault_code: str | None = None
+    labor_hours: float
+    labor_rate: float
+    labor_cost: float
+    parts_cost: float
+    total_cost: float
+    approved_amount: float | None = None
+    currency: str
+    status: str
+    supplier_recoverable: bool
+    recovered_amount: float
+    decided_by: str | None = None
+    submitted_at: datetime
+    decided_at: datetime | None = None
+    paid_at: datetime | None = None
+    lines: list[ClaimLineOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------------------------------- #
+# Audit log read schema
+# --------------------------------------------------------------------------- #
+class AuditLogOut(BaseModel):
+    id: str
+    timestamp: datetime
+    actor_type: str
+    actor_id: str
+    action: str
+    resource_type: str
+    resource_id: str | None = None
+    after_state: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
