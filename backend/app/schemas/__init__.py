@@ -149,6 +149,38 @@ class TicketOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CustomerTicketOut(BaseModel):
+    """Redacted ticket view for customer-role callers.
+    Strips fraud scores and internal agent reasoning that customers must not see."""
+
+    id: str
+    vehicle_vin: str | None = None
+    domain: str | None = None
+    status: str
+    summary: str
+    claim_number: str | None = None
+    decision: str | None = None
+    decision_message: str | None = None
+    attachments: list[AttachmentOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_ticket(cls, t: object) -> "CustomerTicketOut":
+        rec = getattr(t, "recommendation", None) or {}
+        return cls(
+            id=getattr(t, "id", ""),
+            vehicle_vin=getattr(t, "vehicle_vin", None),
+            domain=getattr(t, "domain", None),
+            status=getattr(t, "status", ""),
+            summary=getattr(t, "summary", ""),
+            claim_number=getattr(t, "claim_number", None),
+            decision=rec.get("final_decision") if isinstance(rec, dict) else None,
+            decision_message=rec.get("draft_email") if isinstance(rec, dict) else None,
+            attachments=getattr(t, "attachments", []),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Recall + Parts LLM decision objects
 # --------------------------------------------------------------------------- #

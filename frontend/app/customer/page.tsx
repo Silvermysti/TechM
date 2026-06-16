@@ -24,7 +24,7 @@ const CATEGORIES = [
 ];
 
 const STATUS_STEPS = [
-  { keys: ["submitted", "under_review"], label: "Submitted" },
+  { keys: ["submitted", "under_review", "processing"], label: "Submitted" },
   { keys: ["awaiting_approval"], label: "Under Review" },
   { keys: ["resolved", "rejected", "escalated"], label: "Decision Made" },
 ];
@@ -35,6 +35,8 @@ const STATUS_CHIPS: Record<string, string> = {
   escalated: "border-warn/40 text-warn",
   awaiting_approval: "border-techm/40 text-techm",
   under_review: "border-line text-muted",
+  processing: "border-line text-muted",
+  failed: "border-danger/40 text-danger",
 };
 
 function StatusTracker({ ticketId }: { ticketId: string }) {
@@ -100,28 +102,36 @@ function StatusTracker({ ticketId }: { ticketId: string }) {
         })}
       </div>
 
-      {["resolved", "rejected", "escalated"].includes(status) &&
-        ticket?.recommendation && (
-          <div className="mt-6 rounded-xl border border-line bg-raised p-4 space-y-3">
-            <p className="text-sm font-medium text-ink">
-              Outcome:{" "}
-              <span className="font-semibold capitalize text-techm">
-                {ticket.human_decision ?? status}
+      {status === "failed" && (
+        <p className="mt-5 text-sm text-danger">
+          We encountered an issue processing your request. Please try submitting again or
+          contact support.
+        </p>
+      )}
+      {["resolved", "rejected", "escalated"].includes(status) && (
+        <div className="mt-6 rounded-xl border border-line bg-raised p-4 space-y-3">
+          <p className="text-sm font-medium text-ink">
+            Outcome:{" "}
+            <span className="font-semibold capitalize text-techm">
+              {(ticket as Record<string, unknown>)?.decision as string ??
+               (ticket as Record<string, unknown>)?.human_decision as string ?? status}
+            </span>
+          </p>
+          {ticket?.claim_number && (
+            <div className="flex items-center gap-3 rounded-lg border border-ok/30 bg-ok-soft px-4 py-2.5">
+              <span className="text-xs font-mono text-ok font-semibold">CLAIM REF</span>
+              <span className="font-mono text-sm font-bold text-ink tracking-wider">
+                {ticket.claim_number}
               </span>
-            </p>
-            {ticket.claim_number && (
-              <div className="flex items-center gap-3 rounded-lg border border-ok/30 bg-ok-soft px-4 py-2.5">
-                <span className="text-xs font-mono text-ok font-semibold">CLAIM REF</span>
-                <span className="font-mono text-sm font-bold text-ink tracking-wider">
-                  {ticket.claim_number}
-                </span>
-              </div>
-            )}
+            </div>
+          )}
+          {((ticket as Record<string, unknown>)?.decision_message as string | undefined) && (
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted">
-              {ticket.recommendation.draft_email || ticket.recommendation.reasoning}
+              {(ticket as Record<string, unknown>).decision_message as string}
             </p>
-          </div>
-        )}
+          )}
+        </div>
+      )}
       {status === "awaiting_approval" && (
         <p className="mt-5 text-sm text-muted">
           Your request is with our team for final approval. We&apos;ll update this page the

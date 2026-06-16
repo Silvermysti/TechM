@@ -11,6 +11,13 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
     ...init,
   });
+  if (res.status === 401) {
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("session");
+      window.location.href = "/login";
+    }
+    throw new Error("401: Session expired");
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status}: ${text}`);

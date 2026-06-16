@@ -73,13 +73,21 @@ def test_ticket_lifecycle(client, customer_headers, manager_headers, monkeypatch
     assert ticket_id
 
     # 2. ticket is awaiting approval (AC repair cost exceeds the auto-approve cap, so
-    #    tiered autonomy routes it to a human) with a recommendation
+    #    tiered autonomy routes it to a human). Customer gets a redacted view.
     r = client.get(f"/api/v1/tickets/{ticket_id}", headers=customer_headers)
     assert r.status_code == 200
     ticket = r.json()
     assert ticket["status"] == "awaiting_approval"
-    assert ticket["recommendation"]["decision"] == "approve"
     assert ticket["domain"] == "warranty"
+    # recommendation / agent_trace not exposed to customers
+    assert "recommendation" not in ticket
+    assert "agent_trace" not in ticket
+
+    # manager can see the full ticket including recommendation
+    r = client.get(f"/api/v1/tickets/{ticket_id}", headers=manager_headers)
+    assert r.status_code == 200
+    full = r.json()
+    assert full["recommendation"]["decision"] == "approve"
 
     # 3. it appears in the list
     r = client.get("/api/v1/tickets", headers=customer_headers)

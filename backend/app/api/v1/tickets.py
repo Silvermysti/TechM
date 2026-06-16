@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import Principal, get_current_principal, require_manager
 from app.db.session import get_db
 from app.models import Ticket
-from app.schemas import DecisionRequest, TicketOut
+from app.schemas import CustomerTicketOut, DecisionRequest, TicketOut
 from app.services.graph_runner import decide_ticket
 
 router = APIRouter(prefix="/api/v1", tags=["tickets"])
@@ -30,18 +30,20 @@ def list_tickets(
     return list(db.scalars(q).all())
 
 
-@router.get("/tickets/{ticket_id}", response_model=TicketOut)
+@router.get("/tickets/{ticket_id}")
 def get_ticket(
     ticket_id: str,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
-) -> Ticket:
+) -> TicketOut | CustomerTicketOut:
     ticket = db.get(Ticket, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     if principal.role != "manager" and ticket.customer_id != principal.customer_id:
         # Don't reveal existence of other customers' tickets.
         raise HTTPException(status_code=404, detail="ticket not found")
+    if principal.role == "customer":
+        return CustomerTicketOut.from_ticket(ticket)
     return ticket
 
 

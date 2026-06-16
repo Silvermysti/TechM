@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ from app.core.langgraph.intake import next_intake_step
 from app.db.session import get_db
 from app.models import Attachment, IntakeSession, Vehicle
 from app.schemas import AttachmentOut, IntakeMessage, IntakeReply
-from app.services.graph_runner import start_ticket
+from app.services.graph_runner import create_ticket_record, run_ticket_graph
 
 router = APIRouter(prefix="/api/v1", tags=["intake"])
 
@@ -91,6 +91,7 @@ async def upload_evidence(
 @router.post("/intake", response_model=IntakeReply)
 def intake(
     msg: IntakeMessage,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ) -> IntakeReply:
@@ -140,7 +141,7 @@ def intake(
                            enough_info=False, ticket_id=None,
                            request_image=decision.request_image)
 
-    # Enough info -> create the ticket and run the orchestrator.
+    # Enough info -> create the ticket record immediately, then run the graph in background.
     vin = decision.extracted.vin or session.vin
     if vin and not _vin_belongs_to(db, vin, principal.customer_id):
         vin = session.vin  # never file against someone else's VIN
@@ -148,10 +149,9 @@ def intake(
     # Customer-selected category wins over the model's classification.
     domain = session.category or decision.domain or "warranty"
     summary = decision.summary or msg.message
-    ticket = start_ticket(
+    ticket = create_ticket_record(
         db, customer_id=principal.customer_id, vin=vin, component=component,
         domain=domain, summary=summary, apqc=decision.apqc_process,
-        input_text=msg.message,
     )
 
     # Link any evidence uploaded during this chat session to the new ticket.
@@ -160,6 +160,9 @@ def intake(
     ).update({"ticket_id": ticket.id})
     db.delete(session)
     db.commit()
+
+    # Kick off the orchestrator asynchronously — the HTTP response goes back immediately.
+    background_tasks.add_task(run_ticket_graph, ticket.id)
 
     reply = (
         f"Thanks — I've logged your {domain} request (ticket {ticket.id[:8]}). "

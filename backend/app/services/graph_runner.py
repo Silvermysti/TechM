@@ -132,6 +132,73 @@ def _finalize_ticket(db: Session, ticket: Ticket, result: dict) -> None:
     _emit(ticket.id, "done", {"ticket_id": ticket.id})
 
 
+def create_ticket_record(
+    db: Session,
+    *,
+    customer_id: str | None,
+    vin: str | None,
+    component: str | None,
+    domain: str,
+    summary: str,
+    apqc: str | None,
+) -> Ticket:
+    """Commit the ticket as 'processing' and return immediately.
+    Call run_ticket_graph(ticket.id) in a BackgroundTask to do the pipeline work."""
+    ticket = Ticket(
+        customer_id=customer_id, vehicle_vin=vin, component=component, domain=domain,
+        classification=domain, summary=summary, apqc_process=apqc,
+        status="processing",
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+    _emit(ticket.id, "ticket.created", {"ticket_id": ticket.id, "domain": domain})
+    return ticket
+
+
+def run_ticket_graph(ticket_id: str, *, extra_context: dict | None = None) -> None:
+    """Run the orchestrator for an existing ticket. Designed for BackgroundTasks —
+    opens its own DB session so the request session is not shared across threads."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        ticket = db.get(Ticket, ticket_id)
+        if ticket is None:
+            logger.error("run_ticket_graph: ticket %s not found", ticket_id)
+            return
+
+        state = {
+            "request_id": ticket.id,
+            "input_text": ticket.summary,
+            "customer_id": ticket.customer_id,
+            "vehicle_vin": ticket.vehicle_vin,
+            "component": ticket.component,
+            "domain": ticket.domain or "warranty",
+            "summary": ticket.summary,
+            "apqc_process": ticket.apqc_process,
+            "context": extra_context or {},
+        }
+        _emit(ticket.id, "agent.started", {"domain": ticket.domain})
+        try:
+            result = start_run(state, thread_id=ticket.id)
+        except Exception:
+            logger.exception("graph run failed for ticket %s", ticket_id)
+            ticket.status = "failed"
+            _emit(ticket.id, "ticket.failed", {"ticket_id": ticket_id})
+            _emit(ticket.id, "done", {"ticket_id": ticket_id})
+            _audit(db, actor_type="agent", actor_id="orchestrator",
+                   action="run:failed", resource_id=ticket_id)
+            db.commit()
+            return
+
+        ticket.customer_id = ticket.customer_id or result["values"].get("customer_id")
+        _finalize_ticket(db, ticket, result)
+        db.commit()
+    finally:
+        db.close()
+
+
 def start_ticket(
     db: Session,
     *,
@@ -144,36 +211,15 @@ def start_ticket(
     input_text: str,
     extra_context: dict | None = None,
 ) -> Ticket:
-    """Create a ticket and run the orchestrator until it pauses or auto-finalizes."""
-    ticket = Ticket(
-        customer_id=customer_id, vehicle_vin=vin, component=component, domain=domain,
-        classification=domain, summary=summary, apqc_process=apqc,
-        status="under_review",
+    """Create a ticket and run the orchestrator synchronously (used in tests and
+    direct API calls that don't need background execution)."""
+    ticket = create_ticket_record(
+        db, customer_id=customer_id, vin=vin, component=component,
+        domain=domain, summary=summary, apqc=apqc,
     )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    _emit(ticket.id, "ticket.created", {"ticket_id": ticket.id, "domain": domain})
-
-    state = {
-        "request_id": ticket.id,
-        "input_text": input_text,
-        "customer_id": customer_id,
-        "vehicle_vin": vin,
-        "component": component,
-        "domain": domain,
-        "summary": summary,
-        "apqc_process": apqc,
-        "context": extra_context or {},
-    }
-    _emit(ticket.id, "agent.started", {"domain": domain})
-    result = start_run(state, thread_id=ticket.id)
-
-    # Trust the authenticated caller's id; only fall back to enrichment if absent.
-    ticket.customer_id = customer_id or result["values"].get("customer_id")
-    _finalize_ticket(db, ticket, result)
-    db.commit()
+    run_ticket_graph(ticket.id, extra_context=extra_context)
+    # Re-fetch after background run updated via its own session.
+    db.expire(ticket)
     db.refresh(ticket)
     return ticket
 
