@@ -16,6 +16,22 @@ def client():
     return TestClient(app)
 
 
+def _auth(client, email: str, password: str) -> dict:
+    r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+@pytest.fixture
+def customer_headers(client):
+    return _auth(client, "rajesh.demo@example.com", "demo1234")
+
+
+@pytest.fixture
+def manager_headers(client):
+    return _auth(client, "manager@techmahindra.com", "manager123")
+
+
 def _fake_decide(schema, system, user, **kwargs):
     from app.schemas import FraudAssessment, WarrantyRecommendation
 
@@ -37,7 +53,7 @@ def _fake_intake(history):
     )
 
 
-def test_ticket_lifecycle(client, monkeypatch):
+def test_ticket_lifecycle(client, customer_headers, manager_headers, monkeypatch):
     from app.core.langgraph import intake
     from app.services import llm
 
@@ -49,15 +65,16 @@ def test_ticket_lifecycle(client, monkeypatch):
         "session_id": "s1",
         "message": "My AC failed, VIN MA3DEMO00000SWIFT",
         "vin": "MA3DEMO00000SWIFT",
-    })
+    }, headers=customer_headers)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["enough_info"] is True
     ticket_id = body["ticket_id"]
     assert ticket_id
 
-    # 2. ticket is awaiting approval with a recommendation
-    r = client.get(f"/api/v1/tickets/{ticket_id}")
+    # 2. ticket is awaiting approval (AC repair cost exceeds the auto-approve cap, so
+    #    tiered autonomy routes it to a human) with a recommendation
+    r = client.get(f"/api/v1/tickets/{ticket_id}", headers=customer_headers)
     assert r.status_code == 200
     ticket = r.json()
     assert ticket["status"] == "awaiting_approval"
@@ -65,18 +82,18 @@ def test_ticket_lifecycle(client, monkeypatch):
     assert ticket["domain"] == "warranty"
 
     # 3. it appears in the list
-    r = client.get("/api/v1/tickets")
+    r = client.get("/api/v1/tickets", headers=customer_headers)
     assert any(t["id"] == ticket_id for t in r.json())
 
     # 4. manager approves -> resolved
     r = client.post(f"/api/v1/tickets/{ticket_id}/decision",
-                    json={"decision": "approve", "actor": "manager"})
+                    json={"decision": "approve"}, headers=manager_headers)
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "resolved"
     assert r.json()["human_decision"] == "approve"
 
 
-def test_intake_asks_follow_up(client, monkeypatch):
+def test_intake_asks_follow_up(client, customer_headers, monkeypatch):
     from app.core.langgraph import intake
 
     def _needs_more(history):
@@ -86,9 +103,33 @@ def test_intake_asks_follow_up(client, monkeypatch):
     monkeypatch.setattr(intake, "default_decider", _needs_more)
 
     r = client.post("/api/v1/intake", json={"session_id": "s2",
-                                             "message": "Something is wrong"})
+                                             "message": "Something is wrong"},
+                    headers=customer_headers)
     assert r.status_code == 200
     body = r.json()
     assert body["enough_info"] is False
     assert "start" in body["reply"].lower()
     assert body["ticket_id"] is None
+
+
+def test_endpoints_require_auth(client):
+    assert client.get("/api/v1/tickets").status_code == 401
+    assert client.post("/api/v1/intake",
+                       json={"session_id": "x", "message": "hi"}).status_code == 401
+
+
+def test_customer_cannot_decide(client, customer_headers, monkeypatch):
+    from app.core.langgraph import intake
+    from app.services import llm
+    monkeypatch.setattr(intake, "default_decider", _fake_intake)
+    monkeypatch.setattr(llm, "decide", _fake_decide)
+
+    r = client.post("/api/v1/intake", json={
+        "session_id": "s3", "message": "AC failed", "vin": "MA3DEMO00000SWIFT",
+    }, headers=customer_headers)
+    ticket_id = r.json()["ticket_id"]
+
+    # A customer must not be able to approve/reject.
+    r = client.post(f"/api/v1/tickets/{ticket_id}/decision",
+                    json={"decision": "approve"}, headers=customer_headers)
+    assert r.status_code == 403

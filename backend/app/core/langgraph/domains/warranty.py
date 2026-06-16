@@ -126,6 +126,29 @@ def warranty_fraud(state: AfterSalesState) -> dict:
     }
 
 
+def warranty_cost(state: AfterSalesState) -> dict:
+    """Deterministic repair costing (labor + parts) — drives the autonomy gate and
+    surfaces the figure for the reviewer. No LLM: warranty money must be auditable."""
+    from app.db.session import SessionLocal
+    from app.tools.cost_estimate import estimate_cost
+
+    db = SessionLocal()
+    try:
+        costing = estimate_cost(db, component=state.get("component"))
+    finally:
+        db.close()
+
+    context = dict(state.get("context") or {})
+    context["cost"] = costing
+    return {
+        "estimated_cost": costing["total_cost"],
+        "context": context,
+        "agent_outputs": _append_output(
+            state, {"agent": "Cost Estimator", "apqc": "6.7.3.4", "output": costing}
+        ),
+    }
+
+
 def warranty_recommend(state: AfterSalesState) -> dict:
     from app.services import llm
 

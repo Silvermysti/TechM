@@ -49,6 +49,11 @@ def db():
     session.commit()
     yield session
     session.close()
+    # This fixture destructively rewrites the shared seeded data (claim codes/parts),
+    # so restore the canonical fleet for the other test modules that rely on it
+    # (e.g. tiered-autonomy routing now depends on real AC/electrical costs).
+    from app.seed.seed import seed
+    seed()
 
 
 def test_estimate_cost_combines_labor_and_parts(db):
@@ -97,6 +102,20 @@ def test_build_claim_creates_costed_record_with_lines(db):
     kinds = {ln.line_type for ln in lines}
     assert kinds == {"labor", "part"}
     assert round(sum(ln.line_total for ln in lines), 2) == claim.total_cost
+
+
+def test_claim_numbers_are_unique(db):
+    t1 = Ticket(vehicle_vin="VINA", component="brakes", domain="warranty",
+                summary="a", status="awaiting_approval")
+    t2 = Ticket(vehicle_vin="VINB", component="brakes", domain="warranty",
+                summary="b", status="awaiting_approval")
+    db.add_all([t1, t2])
+    db.commit()
+
+    c1 = build_warranty_claim(db, t1, decided_by="m")
+    c2 = build_warranty_claim(db, t2, decided_by="m")
+    db.commit()
+    assert c1.claim_number != c2.claim_number
 
 
 def test_build_claim_oem_part_not_recoverable(db):

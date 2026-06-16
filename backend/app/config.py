@@ -62,6 +62,25 @@ class Settings(BaseSettings):
         "postgresql+psycopg://aftersales:aftersales@localhost:5432/aftersales"
     )
 
+    # Durable LangGraph checkpoints. For a sqlite DATABASE_URL we keep a sidecar
+    # sqlite file so the ORM's drop_all/create_all never touches checkpoint tables;
+    # for Postgres the saver creates its own tables in the same database.
+    checkpoint_db_path: str = "./checkpoints.db"
+
+    # Auth (JWT). Override JWT_SECRET in every real environment.
+    jwt_secret: str = "dev-insecure-secret-change-me-0123456789abcdef"
+    jwt_expire_minutes: int = 720  # 12h demo sessions
+
+    # Intake session store (DB-backed) — abandoned chats expire after this.
+    intake_session_ttl_minutes: int = 120
+
+    # Tiered autonomy (Wave A): auto-finalize only clearly-safe warranty claims;
+    # everything else still routes to a human. Disable to force HITL on everything.
+    auto_approve_enabled: bool = True
+    auto_approve_min_confidence: float = 0.85
+    auto_approve_max_fraud: float = 0.15
+    auto_approve_max_cost: float = 15000.0  # INR
+
     # App
     cors_origins: str = "http://localhost:3000"
 

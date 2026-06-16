@@ -10,16 +10,18 @@ PostgresSaver for multi-instance/durable runs).
 
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from app.config import get_settings
 from app.core.langgraph.domains.warranty import (
+    warranty_cost,
     warranty_fraud,
     warranty_recommend,
     warranty_validate,
 )
 from app.core.langgraph.state import AfterSalesState
+from app.services.checkpoint import get_checkpointer
 
 # Domains that have a real pipeline today; others fall through to the stub.
 REAL_DOMAINS = {"warranty"}
@@ -73,6 +75,27 @@ def stub_domain(state: AfterSalesState) -> dict:
     return {"recommendation": rec, "human_approval_required": True}
 
 
+def autonomy_router(state: AfterSalesState) -> str:
+    """Tiered autonomy (Wave A): only a clearly-safe warranty claim auto-finalizes;
+    anything else routes to a human. Thresholds live in config."""
+    s = get_settings()
+    rec = state.get("recommendation") or {}
+    if (
+        s.auto_approve_enabled
+        and rec.get("decision") == "approve"
+        and (rec.get("confidence") or 0.0) >= s.auto_approve_min_confidence
+        and (state.get("fraud_risk") or 0.0) <= s.auto_approve_max_fraud
+        and (state.get("estimated_cost") or 0.0) <= s.auto_approve_max_cost
+    ):
+        return "auto"
+    return "human"
+
+
+def auto_approve(state: AfterSalesState) -> dict:
+    """Record a system auto-approval (no human needed for low-risk, low-cost claims)."""
+    return {"human_decision": "approve", "auto_finalized": True}
+
+
 def await_human(state: AfterSalesState) -> dict:
     """Pause for a human decision. Resumed via Command(resume=<decision>)."""
     decision = interrupt(
@@ -99,6 +122,8 @@ def build_graph():
     g.add_node("warranty_validate", warranty_validate)
     g.add_node("warranty_fraud", warranty_fraud)
     g.add_node("warranty_recommend", warranty_recommend)
+    g.add_node("warranty_cost", warranty_cost)
+    g.add_node("auto_approve", auto_approve)
     g.add_node("stub", stub_domain)
     g.add_node("await_human", await_human)
     g.add_node("finalize", finalize)
@@ -110,17 +135,21 @@ def build_graph():
     )
     g.add_edge("warranty_validate", "warranty_fraud")
     g.add_edge("warranty_fraud", "warranty_recommend")
-    g.add_edge("warranty_recommend", "await_human")
+    g.add_edge("warranty_recommend", "warranty_cost")
+    g.add_conditional_edges(
+        "warranty_cost", autonomy_router,
+        {"auto": "auto_approve", "human": "await_human"},
+    )
+    g.add_edge("auto_approve", "finalize")
     g.add_edge("stub", "await_human")
     g.add_edge("await_human", "finalize")
     g.add_edge("finalize", END)
     return g
 
 
-# Compile once with a process-wide checkpointer so paused threads survive between
-# the submit request and the later approve request.
-_checkpointer = InMemorySaver()
-_graph = build_graph().compile(checkpointer=_checkpointer)
+# Compile once with a durable checkpointer so paused threads survive a server restart
+# and are visible across worker processes (see services/checkpoint.py).
+_graph = build_graph().compile(checkpointer=get_checkpointer())
 
 
 def _config(thread_id: str) -> dict:

@@ -63,6 +63,7 @@ class WarrantyRecommendation(BaseModel):
 # --------------------------------------------------------------------------- #
 class LoginRequest(BaseModel):
     email: str
+    password: str
 
 
 class VehicleOut(BaseModel):
@@ -74,7 +75,18 @@ class VehicleOut(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Lightweight demo identity — captured so actions are attributable in the audit log."""
+    """Identity + signed token. The token authorizes every subsequent request."""
+
+    token: str
+    role: Literal["customer", "manager"]
+    name: str
+    email: str
+    customer_id: str | None = None
+    vehicles: list[VehicleOut] = Field(default_factory=list)
+
+
+class MeResponse(BaseModel):
+    """Current identity resolved from a token (no secret echoed back)."""
 
     role: Literal["customer", "manager"]
     name: str
@@ -112,8 +124,8 @@ class AttachmentOut(BaseModel):
 
 
 class DecisionRequest(BaseModel):
+    # The actor is taken from the authenticated token, never from the request body.
     decision: Literal["approve", "reject", "escalate"]
-    actor: str = "manager"
 
 
 class TicketOut(BaseModel):

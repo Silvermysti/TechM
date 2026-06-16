@@ -58,3 +58,25 @@ def test_warranty_graph_pauses_then_resumes(monkeypatch):
     resumed = resume_run(thread_id="t1", decision="approve")
     assert resumed["final_status"] == "resolved"
     assert resumed["human_decision"] == "approve"
+
+
+def test_low_cost_warranty_auto_finalizes(monkeypatch):
+    """Tiered autonomy: a low-cost, high-confidence, low-fraud claim resolves without
+    pausing for a human (electrical ≈ ₹10.7k, under the ₹15k auto-approve cap)."""
+    from app.services import llm
+    monkeypatch.setattr(llm, "decide", _fake_decide)
+
+    state = {
+        "request_id": "t2",
+        "input_text": "alternator failure",
+        "vehicle_vin": "MA3DEMO00000SWIFT",
+        "component": "electrical",
+        "domain": "warranty",
+        "summary": "electrical fault",
+    }
+    result = start_run(state, thread_id="t2")
+    assert result["interrupted"] is False
+    values = result["values"]
+    assert values["auto_finalized"] is True
+    assert values["human_decision"] == "approve"
+    assert values["final_status"] == "resolved"

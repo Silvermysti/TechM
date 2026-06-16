@@ -21,9 +21,11 @@ class AfterSalesState(TypedDict, total=False):
     context: dict
     agent_outputs: list[dict]
     fraud_risk: float
+    estimated_cost: float
     recommendation: dict | None
     human_approval_required: bool
     human_decision: str | None
+    auto_finalized: bool
     final_status: str | None
     escalated: bool
     error: str | None

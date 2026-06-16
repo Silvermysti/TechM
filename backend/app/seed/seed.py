@@ -17,15 +17,24 @@ from datetime import date, timedelta
 from app.db.session import Base, SessionLocal, engine
 from app.models import (
     ClaimCode,
+    Counter,
     Customer,
     PartInventory,
     Recall,
+    Staff,
     Supplier,
     Vehicle,
     WarrantyPolicy,
 )
+from app.services.security import hash_password
 
 random.seed(42)
+
+# Demo credentials (every seeded account shares one password for easy demoing).
+DEMO_PASSWORD = "demo1234"
+MANAGER_EMAIL = "manager@techmahindra.com"
+MANAGER_PASSWORD = "manager123"
+_DEMO_HASH = hash_password(DEMO_PASSWORD)
 
 FIRST_NAMES = [
     "Rajesh", "Priya", "Amit", "Sneha", "Vikram", "Anjali", "Rahul", "Divya",
@@ -128,6 +137,7 @@ def seed() -> None:
                 name=f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
                 email=f"customer{i+1}@example.com",
                 phone=f"+9198{random.randint(10000000, 99999999)}",
+                password_hash=_DEMO_HASH,
             )
             db.add(cust)
             db.flush()  # get cust.id
@@ -146,7 +156,7 @@ def seed() -> None:
         # Guarantee a clean Phase 1 demo case: a Swift with a *valid* warranty,
         # purchased 3 months ago (AC failure scenario).
         demo_cust = Customer(name="Rajesh Sharma", email="rajesh.demo@example.com",
-                             phone="+919812345678")
+                             phone="+919812345678", password_hash=_DEMO_HASH)
         db.add(demo_cust)
         db.flush()
         db.add(Vehicle(vin="MA3DEMO00000SWIFT", customer_id=demo_cust.id,
@@ -154,7 +164,8 @@ def seed() -> None:
                        purchase_date=today - timedelta(days=90)))
 
         # Guarantee a recall cohort: Honda City 2023 brakes — affected VINs.
-        recall_cust = Customer(name="Recall Cohort", email="recall@example.com")
+        recall_cust = Customer(name="Recall Cohort", email="recall@example.com",
+                               password_hash=_DEMO_HASH)
         db.add(recall_cust)
         db.flush()
         for k in range(6):
@@ -167,6 +178,11 @@ def seed() -> None:
                       description="Front brake caliper may seize under heavy load.",
                       status="open"))
 
+        # Internal staff (manager) + the warranty-claim sequence counter.
+        db.add(Staff(email=MANAGER_EMAIL, name="Ops Manager", role="manager",
+                     password_hash=hash_password(MANAGER_PASSWORD)))
+        db.add(Counter(name="warranty_claim", value=0))
+
         db.commit()
 
         n_cust = db.query(Customer).count()
@@ -174,7 +190,9 @@ def seed() -> None:
         print(f"Seeded: {n_cust} customers, {n_veh} vehicles, "
               f"{len(MODELS)} policies, {len(SUPPLIERS)} suppliers, "
               f"{len(CLAIM_CODES)} claim codes, {len(COMPONENTS_FOR_PARTS)} parts, "
-              f"1 recall.")
+              f"1 recall, 1 staff.")
+        print(f"  Demo login: rajesh.demo@example.com / {DEMO_PASSWORD}")
+        print(f"  Manager login: {MANAGER_EMAIL} / {MANAGER_PASSWORD}")
     finally:
         db.close()
 

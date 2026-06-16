@@ -6,12 +6,15 @@ The graph owns workflow state (via its checkpointer); these helpers create/refre
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.core.langgraph.orchestrator import resume_run, start_run
 from app.models import AgentExecution, AuditLog, Ticket
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -39,9 +42,23 @@ def _audit(db: Session, *, actor_type: str, actor_id: str, action: str,
                     resource_type="ticket", resource_id=resource_id, after_state=after))
 
 
+def _record_warranty_claim(db: Session, ticket: Ticket, *, decided_by: str) -> None:
+    """Turn an approved warranty ticket into a costed claim. Guarded so a costing
+    hiccup can never block/again undo the decision itself."""
+    if (ticket.domain or "") != "warranty":
+        return
+    try:
+        from app.tools.cost_estimate import build_warranty_claim
+
+        build_warranty_claim(db, ticket, decided_by=decided_by, status="approved")
+    except Exception:  # noqa: BLE001 — costing is supplementary to the decision
+        logger.exception("warranty claim costing failed for ticket %s", ticket.id)
+
+
 def start_ticket(
     db: Session,
     *,
+    customer_id: str | None,
     vin: str | None,
     component: str | None,
     domain: str,
@@ -49,10 +66,12 @@ def start_ticket(
     apqc: str | None,
     input_text: str,
 ) -> Ticket:
-    """Create a ticket and run the orchestrator until it pauses for approval."""
+    """Create a ticket and run the orchestrator until it pauses for approval (or, for
+    a low-risk warranty claim, auto-finalizes via tiered autonomy)."""
     ticket = Ticket(
-        vehicle_vin=vin, component=component, domain=domain, classification=domain,
-        summary=summary, apqc_process=apqc, status="under_review",
+        customer_id=customer_id, vehicle_vin=vin, component=component, domain=domain,
+        classification=domain, summary=summary, apqc_process=apqc,
+        status="under_review",
     )
     db.add(ticket)
     db.commit()
@@ -61,6 +80,7 @@ def start_ticket(
     state = {
         "request_id": ticket.id,
         "input_text": input_text,
+        "customer_id": customer_id,
         "vehicle_vin": vin,
         "component": component,
         "domain": domain,
@@ -72,21 +92,45 @@ def start_ticket(
 
     ticket.recommendation = result["recommendation"]
     ticket.agent_trace = values.get("agent_outputs")
-    ticket.customer_id = values.get("customer_id")
+    # Trust the authenticated caller's id; only fall back to enrichment if absent.
+    ticket.customer_id = customer_id or values.get("customer_id")
     ticket.thread_id = ticket.id
-    ticket.status = "awaiting_approval" if result["interrupted"] else "resolved"
+
+    if result["interrupted"]:
+        ticket.status = "awaiting_approval"
+        _audit(db, actor_type="agent", actor_id="orchestrator",
+               action="created+analyzed", resource_id=ticket.id,
+               after={"status": ticket.status})
+    else:
+        # Tiered autonomy resolved it without a human.
+        decision = values.get("human_decision") or "resolved"
+        ticket.status = values.get("final_status", "resolved")
+        ticket.human_decision = decision
+        ticket.human_actor = "system:auto-approval"
+        ticket.resolved_at = _now()
+        if ticket.recommendation:
+            rec = dict(ticket.recommendation)
+            rec["final_decision"] = decision
+            ticket.recommendation = rec
+        if decision == "approve":
+            _record_warranty_claim(db, ticket, decided_by="system:auto-approval")
+        _audit(db, actor_type="agent", actor_id="system:auto-approval",
+               action=f"auto-decision:{decision}", resource_id=ticket.id,
+               after={"status": ticket.status})
+
     _log_executions(db, ticket.id, values.get("agent_outputs"))
-    _audit(db, actor_type="agent", actor_id="orchestrator", action="created+analyzed",
-           resource_id=ticket.id, after={"status": ticket.status})
     db.commit()
     db.refresh(ticket)
     return ticket
 
 
 def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> Ticket | None:
-    """Resume a paused ticket with the human's decision and finalize it."""
+    """Resume a paused ticket with the human's decision and finalize it.
+
+    Returns None if the ticket doesn't exist or isn't awaiting a human decision
+    (so an already-resolved/auto-finalized ticket can't be re-decided)."""
     ticket = db.get(Ticket, ticket_id)
-    if ticket is None or not ticket.thread_id:
+    if ticket is None or not ticket.thread_id or ticket.status != "awaiting_approval":
         return None
 
     values = resume_run(thread_id=ticket.thread_id, decision=decision)
@@ -100,15 +144,8 @@ def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> 
         rec["final_decision"] = decision
         ticket.recommendation = rec
 
-    # An approved warranty claim becomes a costed financial record (parts + labor).
-    # Guarded so a costing hiccup can never block the human decision itself.
-    if decision == "approve" and (ticket.domain or "") == "warranty":
-        try:
-            from app.tools.cost_estimate import build_warranty_claim
-
-            build_warranty_claim(db, ticket, decided_by=actor, status="approved")
-        except Exception:  # noqa: BLE001 — costing is supplementary to the decision
-            pass
+    if decision == "approve":
+        _record_warranty_claim(db, ticket, decided_by=actor)
 
     _audit(db, actor_type="human", actor_id=actor, action=f"decision:{decision}",
            resource_id=ticket.id, after={"status": ticket.status})

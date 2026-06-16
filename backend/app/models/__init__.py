@@ -45,10 +45,23 @@ class Customer(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(180))
+    email: Mapped[str] = mapped_column(String(180), unique=True, index=True)
     phone: Mapped[str] = mapped_column(String(40), default="")
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
 
     vehicles: Mapped[list["Vehicle"]] = relationship(back_populates="customer")
+
+
+class Staff(Base):
+    """Internal users (managers/ops). Separate from customers; carries a role."""
+
+    __tablename__ = "staff"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(20), default="manager")
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
 
 
 class Vehicle(Base):
@@ -227,7 +240,7 @@ class WarrantyClaim(Base):
     __tablename__ = "warranty_claims"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    claim_number: Mapped[str] = mapped_column(String(30))  # e.g. WC-2026-000123
+    claim_number: Mapped[str] = mapped_column(String(30), unique=True)  # WC-2026-000123
     ticket_id: Mapped[str | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     vehicle_vin: Mapped[str | None] = mapped_column(String(17), nullable=True)
     customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -285,8 +298,38 @@ class WarrantyClaimLine(Base):
     claim: Mapped["WarrantyClaim"] = relationship(back_populates="lines")
 
 
+class IntakeSession(Base):
+    """Durable guided-intake conversation state (replaces the in-memory dict so the
+    chat survives restarts and works across multiple workers). Expired by TTL."""
+
+    __tablename__ = "intake_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    history: Mapped[list] = mapped_column(JSON, default=list)
+    asked: Mapped[int] = mapped_column(Integer, default=0)
+    vin: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+
+
+class Counter(Base):
+    """Atomic named counters (e.g. warranty claim sequence) — increment under the
+    DB's write serialization so generated reference numbers never collide."""
+
+    __tablename__ = "counters"
+
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0)
+
+
 __all__ = [
     "Customer",
+    "Staff",
+    "IntakeSession",
+    "Counter",
     "Vehicle",
     "WarrantyPolicy",
     "Supplier",

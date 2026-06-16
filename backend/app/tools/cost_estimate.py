@@ -12,17 +12,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
     ClaimCode,
+    Counter,
     PartInventory,
     Supplier,
     Ticket,
     WarrantyClaim,
     WarrantyClaimLine,
 )
+
+_CLAIM_SEQ = "warranty_claim"
 
 CURRENCY = "INR"
 
@@ -67,8 +70,24 @@ def estimate_cost(db: Session, *, component: str | None) -> dict:
 
 
 def _claim_number(db: Session) -> str:
+    """Generate a unique claim reference via an atomic DB counter.
+
+    The UPDATE is serialized by the database's write lock, so two concurrent
+    approvals get distinct sequence values; the UNIQUE constraint on
+    WarrantyClaim.claim_number is the final backstop.
+    """
     year = datetime.now(timezone.utc).year
-    seq = db.execute(select(func.count(WarrantyClaim.id))).scalar_one() + 1
+    if db.get(Counter, _CLAIM_SEQ) is None:
+        db.add(Counter(name=_CLAIM_SEQ, value=0))
+        db.flush()
+    db.execute(
+        update(Counter)
+        .where(Counter.name == _CLAIM_SEQ)
+        .values(value=Counter.value + 1)
+    )
+    seq = db.execute(
+        select(Counter.value).where(Counter.name == _CLAIM_SEQ)
+    ).scalar_one()
     return f"WC-{year}-{seq:06d}"
 
 
