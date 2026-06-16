@@ -67,6 +67,17 @@ export type Claim = {
   lines: ClaimLine[];
 };
 
+export type Recall = {
+  id: string;
+  code: string;
+  model: string;
+  year: number;
+  component: string;
+  description: string;
+  status: string;
+  affected_count: number;
+};
+
 export type AuditEntry = {
   id: string;
   timestamp: string;
@@ -98,4 +109,5 @@ export type Session = {
   email: string;
   customer_id: string | null;
   vehicles: Vehicle[];
+  token?: string;
 };

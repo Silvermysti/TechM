@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 
 from app.services.security import decode_access_token
 
@@ -41,10 +41,15 @@ def _bearer(authorization: str | None) -> str:
     return authorization.split(" ", 1)[1].strip()
 
 
-def get_current_principal(authorization: str | None = Header(default=None)) -> Principal:
-    token = _bearer(authorization)
+def get_current_principal(
+    authorization: str | None = Header(default=None),
+    token: str | None = Query(default=None),  # fallback for EventSource (no custom headers)
+) -> Principal:
+    raw = token or (_bearer(authorization) if authorization else None)
+    if not raw:
+        raise _UNAUTH
     try:
-        claims = decode_access_token(token)
+        claims = decode_access_token(raw)
     except jwt.PyJWTError:
         raise _UNAUTH
     try:

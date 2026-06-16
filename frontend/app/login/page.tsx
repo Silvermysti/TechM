@@ -10,11 +10,13 @@ const QUICK = [
   {
     label: "Customer",
     email: "rajesh.demo@example.com",
+    password: "demo1234",
     role: "Swift VXI · warranty valid",
   },
   {
     label: "Manager",
     email: "manager@techmahindra.com",
+    password: "manager123",
     role: "Operations staff",
   },
 ];
@@ -28,20 +30,22 @@ const PANEL_FACTS = [
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (value?: string) => {
-    const addr = (value ?? email).trim();
-    if (!addr || busy) return;
+  const submit = async (quick?: { email: string; password: string }) => {
+    const addr = (quick?.email ?? email).trim();
+    const pass = quick?.password ?? password;
+    if (!addr || !pass || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const session = await login(addr);
+      const session = await login(addr, pass);
       setSession(session);
       router.replace(session.role === "manager" ? "/" : "/customer");
     } catch {
-      setError("We couldn't find an account for that email. Try a demo account below.");
+      setError("Invalid email or password. Try a demo account below.");
       setBusy(false);
     }
   };
@@ -51,7 +55,6 @@ export default function LoginPage() {
       {/* ---- Brand panel ---- */}
       <section className="brand-panel relative hidden w-[42%] flex-col justify-between overflow-hidden p-10 text-white lg:flex xl:p-14">
         <div className="brand-grid absolute inset-0" aria-hidden />
-        {/* oversized ghost glyph */}
         <span
           className="pointer-events-none absolute -bottom-24 -right-16 font-display text-[22rem] font-bold leading-none text-white/[0.07]"
           aria-hidden
@@ -111,21 +114,33 @@ export default function LoginPage() {
             Every action is logged and attributed to your identity.
           </p>
 
-          <div className="card mt-7 p-6">
-            <label className="eyebrow">Email address</label>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="you@example.com"
-              autoFocus
-              className="field mt-2 w-full px-4 py-2.5 text-sm"
-            />
-            {error && <p className="mt-3 text-xs text-techm">{error}</p>}
+          <div className="card mt-7 p-6 space-y-3">
+            <div>
+              <label className="eyebrow">Email address</label>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoFocus
+                className="field mt-2 w-full px-4 py-2.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="eyebrow">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder="••••••••"
+                className="field mt-2 w-full px-4 py-2.5 text-sm"
+              />
+            </div>
+            {error && <p className="text-xs text-techm">{error}</p>}
             <button
               onClick={() => submit()}
               disabled={busy}
-              className="mt-4 w-full rounded-xl bg-techm px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-techm-deep disabled:opacity-50"
+              className="mt-1 w-full rounded-xl bg-techm px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-techm-deep disabled:opacity-50"
             >
               {busy ? "Signing in…" : "Continue →"}
             </button>
@@ -136,7 +151,7 @@ export default function LoginPage() {
             {QUICK.map((q) => (
               <button
                 key={q.email}
-                onClick={() => submit(q.email)}
+                onClick={() => submit(q)}
                 disabled={busy}
                 className="card group p-3 text-left transition hover:border-techm disabled:opacity-50"
               >

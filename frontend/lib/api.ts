@@ -1,4 +1,4 @@
-import type { AuditEntry, Attachment, Claim, IntakeReply, Session, Ticket } from "./types";
+import type { AuditEntry, Attachment, Claim, IntakeReply, Recall, Session, Ticket } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -18,10 +18,10 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function login(email: string): Promise<Session> {
+export function login(email: string, password: string): Promise<Session> {
   return jsonFetch<Session>("/api/v1/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, password }),
   });
 }
 
@@ -89,6 +89,23 @@ export function payClaim(id: string): Promise<Claim> {
 
 export function closeClaim(id: string): Promise<Claim> {
   return jsonFetch<Claim>(`/api/v1/claims/${id}/close`, { method: "POST" });
+}
+
+export type PartItem = {
+  id: string; part_name: string; sku: string; component: string;
+  stock_qty: number; eta_days: number; unit_price: number; supplier: string;
+};
+
+export function listParts(): Promise<PartItem[]> {
+  return jsonFetch<PartItem[]>("/api/v1/parts");
+}
+
+export function listRecalls(): Promise<Recall[]> {
+  return jsonFetch<Recall[]>("/api/v1/recalls");
+}
+
+export function triggerRecall(id: string): Promise<Ticket> {
+  return jsonFetch<Ticket>(`/api/v1/recalls/${id}/trigger`, { method: "POST" });
 }
 
 export function listAudit(params?: {

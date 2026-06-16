@@ -12,6 +12,7 @@ import {
   payClaim,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useTicketStream, type SSEEvent } from "@/lib/useSSE";
 import type { AgentOutput, AuditEntry, Claim, Ticket } from "@/lib/types";
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -423,12 +424,115 @@ function AuditLog() {
   );
 }
 
+function AgentMonitor({ tickets }: { tickets: Ticket[] }) {
+  const [watchId, setWatchId] = useState<string | null>(null);
+  const { events, reset } = useTicketStream(watchId);
+
+  const recentTickets = tickets.slice(0, 8);
+
+  const EVENT_LABELS: Record<string, string> = {
+    "ticket.created": "Ticket created",
+    "agent.started": "Agent pipeline started",
+    "agent.step": "Agent step completed",
+    "ticket.awaiting_approval": "Awaiting human approval",
+    "ticket.resolved": "Ticket resolved",
+    "done": "Stream complete",
+  };
+
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[280px_1fr]">
+      <div>
+        <p className="eyebrow mb-2.5">Select a ticket to monitor</p>
+        <div className="space-y-1.5">
+          {recentTickets.length === 0 && (
+            <p className="card p-4 text-sm text-faint">No tickets yet.</p>
+          )}
+          {recentTickets.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { setWatchId(t.id); reset(); }}
+              className={`card w-full px-3 py-2.5 text-left transition ${
+                watchId === t.id ? "border-techm ring-1 ring-techm" : "hover:border-line-strong"
+              }`}
+            >
+              <p className="truncate text-sm font-medium text-ink">{t.summary}</p>
+              <p className="mt-0.5 font-mono text-[10px] text-faint">
+                {t.domain} · #{t.id.slice(0, 8)}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        {!watchId ? (
+          <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-line text-sm text-faint">
+            Select a ticket to stream its agent activity
+          </div>
+        ) : (
+          <div className="card overflow-hidden">
+            <div className="border-b border-line bg-raised px-4 py-2.5 flex items-center justify-between">
+              <p className="font-mono text-xs text-muted">
+                Streaming <span className="text-ink">#{watchId.slice(0, 8)}</span>
+              </p>
+              <span className="flex h-2 w-2 rounded-full bg-ok ring-2 ring-ok/30" />
+            </div>
+            {events.length === 0 ? (
+              <p className="p-4 text-sm text-faint">Waiting for events…</p>
+            ) : (
+              <ol className="divide-y divide-line">
+                {events.filter((e) => e.type !== "ping").map((e: SSEEvent, i) => (
+                  <li key={i} className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className={`flex h-2 w-2 flex-none rounded-full ${
+                        e.type === "done" ? "bg-ok" :
+                        e.type.startsWith("ticket.") ? "bg-techm" : "bg-warn"
+                      }`} />
+                      <span className="text-sm font-medium text-ink">
+                        {EVENT_LABELS[e.type] ?? e.type}
+                      </span>
+                      {e.agent && (
+                        <span className="ml-auto font-mono text-[10px] text-faint">
+                          {e.agent}
+                        </span>
+                      )}
+                      {e.apqc && (
+                        <span className="chip text-[10px]">APQC {e.apqc}</span>
+                      )}
+                    </div>
+                    {e.type === "agent.step" && e.output && (
+                      <dl className="mt-2 space-y-1 pl-4.5">
+                        {Object.entries(e.output as Record<string, unknown>)
+                          .slice(0, 4)
+                          .map(([k, v]) => (
+                            <div key={k} className="flex gap-2 text-xs">
+                              <dt className="w-28 flex-none font-mono text-[10px] uppercase text-faint">
+                                {k.replace(/_/g, " ")}
+                              </dt>
+                              <dd className="truncate text-muted">
+                                {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                              </dd>
+                            </div>
+                          ))}
+                      </dl>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ManagerPortal() {
   const { session, ready } = useAuth(["manager"]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"queue" | "audit">("queue");
+  const [tab, setTab] = useState<"queue" | "audit" | "monitor">("queue");
 
   const refresh = useCallback(async () => {
     try {
@@ -491,7 +595,7 @@ export default function ManagerPortal() {
         </div>
 
         <div className="mt-5 flex gap-1 border-b border-line">
-          {(["queue", "audit"] as const).map((t) => (
+          {(["queue", "monitor", "audit"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -501,7 +605,7 @@ export default function ManagerPortal() {
                   : "text-muted hover:text-ink"
               }`}
             >
-              {t === "queue" ? "Approval Queue" : "Audit Log"}
+              {t === "queue" ? "Approval Queue" : t === "monitor" ? "Agent Monitor" : "Audit Log"}
             </button>
           ))}
         </div>
@@ -509,6 +613,10 @@ export default function ManagerPortal() {
         {tab === "audit" ? (
           <div className="mt-5">
             <AuditLog />
+          </div>
+        ) : tab === "monitor" ? (
+          <div className="mt-5">
+            <AgentMonitor tickets={tickets} />
           </div>
         ) : (
           <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
