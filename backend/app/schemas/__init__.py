@@ -150,6 +150,47 @@ class TicketOut(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Recall + Parts LLM decision objects
+# --------------------------------------------------------------------------- #
+class RecallAssessment(BaseModel):
+    severity: Literal["low", "medium", "high", "critical"]
+    recommended_action: Literal["monitor", "notify", "stop_use", "immediate_recall"]
+    reasoning: str
+    timeline_days: int = Field(
+        description="days to complete customer outreach"
+    )
+
+
+class RecallComms(BaseModel):
+    subject: str
+    body: str
+    urgency: Literal["routine", "urgent", "emergency"]
+
+
+class PartsRecommendation(BaseModel):
+    action: Literal["ready_for_service", "order_required", "out_of_stock"]
+    reasoning: str
+    order_quantity: int = Field(default=0)
+    customer_message: str
+
+
+# --------------------------------------------------------------------------- #
+# Recall API read schema
+# --------------------------------------------------------------------------- #
+class RecallOut(BaseModel):
+    id: str
+    code: str
+    model: str
+    year: int
+    component: str
+    description: str
+    status: str
+    affected_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------------------------------- #
 # Warranty claim read schemas
 # --------------------------------------------------------------------------- #
 class ClaimLineOut(BaseModel):

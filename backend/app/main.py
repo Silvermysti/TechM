@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import audit, auth, claims, intake, tickets
+from app.api.v1 import audit, auth, claims, intake, recalls, stream, tickets
 from app.api.v1.intake import UPLOAD_DIR
 from app.config import get_settings
 from app.db.session import create_all
@@ -16,7 +16,9 @@ from app.db.session import create_all
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure tables exist (no-op if already created / seeded).
+    import asyncio
+    from app.services.events import set_loop
+    set_loop(asyncio.get_event_loop())
     create_all()
     yield
 
@@ -36,6 +38,8 @@ app.include_router(intake.router)
 app.include_router(tickets.router)
 app.include_router(claims.router)
 app.include_router(audit.router)
+app.include_router(recalls.router)
+app.include_router(stream.router)
 
 # Customer evidence photos (uploaded during intake).
 UPLOAD_DIR.mkdir(exist_ok=True)

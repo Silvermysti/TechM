@@ -2,6 +2,7 @@
 
 The graph owns workflow state (via its checkpointer); these helpers create/refresh the
 `tickets` row so the UI has something queryable, and they log a compact audit trail.
+SSE events are published at key stages so the frontend can stream agent activity live.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.langgraph.orchestrator import resume_run, start_run
-from app.models import AgentExecution, AuditLog, Customer, Ticket
+from app.models import AgentExecution, AuditLog, Customer, Recall, Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _emit(ticket_id: str, event_type: str, data: dict | None = None) -> None:
+    try:
+        from app.services.events import publish
+        publish(ticket_id, event_type, data)
+    except Exception:
+        pass
+
+
 def _log_executions(db: Session, ticket_id: str, outputs: list | None) -> None:
-    """Persist one agent_executions row per specialist that ran (the AI run log)."""
     for entry in outputs or []:
         out = entry.get("output") if isinstance(entry, dict) else None
         confidence = out.get("confidence") if isinstance(out, dict) else None
@@ -43,20 +51,18 @@ def _audit(db: Session, *, actor_type: str, actor_id: str, action: str,
 
 
 def _record_warranty_claim(db: Session, ticket: Ticket, *, decided_by: str) -> None:
-    """Turn an approved warranty ticket into a costed claim and notify the customer."""
     if (ticket.domain or "") != "warranty":
         return
     try:
         from app.tools.cost_estimate import build_warranty_claim
 
         claim = build_warranty_claim(db, ticket, decided_by=decided_by, status="approved")
-        # Stamp claim reference on the ticket so the customer portal can show it.
         ticket.claim_number = claim.claim_number
         ticket.claim_id = claim.id
         _notify_customer(db, ticket=ticket, claim_number=claim.claim_number,
                          total_cost=claim.total_cost, currency=claim.currency,
                          decision="approve")
-    except Exception:  # noqa: BLE001 — costing is supplementary to the decision
+    except Exception:
         logger.exception("warranty claim costing failed for ticket %s", ticket.id)
 
 
@@ -82,54 +88,21 @@ def _notify_customer(
         logger.exception("notification failed for ticket %s", ticket.id)
 
 
-def start_ticket(
-    db: Session,
-    *,
-    customer_id: str | None,
-    vin: str | None,
-    component: str | None,
-    domain: str,
-    summary: str,
-    apqc: str | None,
-    input_text: str,
-) -> Ticket:
-    """Create a ticket and run the orchestrator until it pauses for approval (or, for
-    a low-risk warranty claim, auto-finalizes via tiered autonomy)."""
-    ticket = Ticket(
-        customer_id=customer_id, vehicle_vin=vin, component=component, domain=domain,
-        classification=domain, summary=summary, apqc_process=apqc,
-        status="under_review",
-    )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    state = {
-        "request_id": ticket.id,
-        "input_text": input_text,
-        "customer_id": customer_id,
-        "vehicle_vin": vin,
-        "component": component,
-        "domain": domain,
-        "summary": summary,
-        "apqc_process": apqc,
-    }
-    result = start_run(state, thread_id=ticket.id)
+def _finalize_ticket(db: Session, ticket: Ticket, result: dict) -> None:
+    """Shared post-run logic for both start_ticket and trigger_recall."""
     values = result["values"]
-
     ticket.recommendation = result["recommendation"]
     ticket.agent_trace = values.get("agent_outputs")
-    # Trust the authenticated caller's id; only fall back to enrichment if absent.
-    ticket.customer_id = customer_id or values.get("customer_id")
     ticket.thread_id = ticket.id
 
     if result["interrupted"]:
         ticket.status = "awaiting_approval"
+        _emit(ticket.id, "ticket.awaiting_approval",
+              {"summary": ticket.summary, "domain": ticket.domain})
         _audit(db, actor_type="agent", actor_id="orchestrator",
                action="created+analyzed", resource_id=ticket.id,
                after={"status": ticket.status})
     else:
-        # Tiered autonomy resolved it without a human.
         decision = values.get("human_decision") or "resolved"
         ticket.status = values.get("final_status", "resolved")
         ticket.human_decision = decision
@@ -141,21 +114,115 @@ def start_ticket(
             ticket.recommendation = rec
         if decision == "approve":
             _record_warranty_claim(db, ticket, decided_by="system:auto-approval")
+        _emit(ticket.id, "ticket.resolved",
+              {"decision": decision, "status": ticket.status})
         _audit(db, actor_type="agent", actor_id="system:auto-approval",
                action=f"auto-decision:{decision}", resource_id=ticket.id,
                after={"status": ticket.status})
 
     _log_executions(db, ticket.id, values.get("agent_outputs"))
+
+    # Emit per-agent events so the monitor shows the full reasoning chain.
+    for step in (values.get("agent_outputs") or []):
+        _emit(ticket.id, "agent.step", {
+            "agent": step.get("agent", ""),
+            "apqc": step.get("apqc"),
+            "output": step.get("output"),
+        })
+    _emit(ticket.id, "done", {"ticket_id": ticket.id})
+
+
+def start_ticket(
+    db: Session,
+    *,
+    customer_id: str | None,
+    vin: str | None,
+    component: str | None,
+    domain: str,
+    summary: str,
+    apqc: str | None,
+    input_text: str,
+    extra_context: dict | None = None,
+) -> Ticket:
+    """Create a ticket and run the orchestrator until it pauses or auto-finalizes."""
+    ticket = Ticket(
+        customer_id=customer_id, vehicle_vin=vin, component=component, domain=domain,
+        classification=domain, summary=summary, apqc_process=apqc,
+        status="under_review",
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    _emit(ticket.id, "ticket.created", {"ticket_id": ticket.id, "domain": domain})
+
+    state = {
+        "request_id": ticket.id,
+        "input_text": input_text,
+        "customer_id": customer_id,
+        "vehicle_vin": vin,
+        "component": component,
+        "domain": domain,
+        "summary": summary,
+        "apqc_process": apqc,
+        "context": extra_context or {},
+    }
+    _emit(ticket.id, "agent.started", {"domain": domain})
+    result = start_run(state, thread_id=ticket.id)
+
+    # Trust the authenticated caller's id; only fall back to enrichment if absent.
+    ticket.customer_id = customer_id or result["values"].get("customer_id")
+    _finalize_ticket(db, ticket, result)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def trigger_recall(db: Session, *, recall_id: str, actor: str) -> Ticket:
+    """Create and run a recall-processing ticket for a specific recall record."""
+    recall = db.get(Recall, recall_id)
+    if recall is None:
+        raise ValueError(f"Recall {recall_id} not found")
+
+    summary = (
+        f"Recall {recall.code}: {recall.model} {recall.year} — "
+        f"{recall.component} — {recall.description[:80]}"
+    )
+    ticket = Ticket(
+        domain="recall",
+        classification="recall",
+        component=recall.component,
+        summary=summary,
+        apqc_process="6.7.4",
+        status="under_review",
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    _emit(ticket.id, "ticket.created", {"ticket_id": ticket.id, "domain": "recall"})
+
+    state = {
+        "request_id": ticket.id,
+        "input_text": summary,
+        "domain": "recall",
+        "component": recall.component,
+        "summary": summary,
+        "context": {"recall_id": recall_id, "recall_component": recall.component},
+    }
+    _emit(ticket.id, "agent.started", {"domain": "recall", "recall_code": recall.code})
+    result = start_run(state, thread_id=ticket.id)
+    _finalize_ticket(db, ticket, result)
+
+    _audit(db, actor_type="human", actor_id=actor, action="recall:trigger",
+           resource_id=ticket.id, after={"recall_id": recall_id})
     db.commit()
     db.refresh(ticket)
     return ticket
 
 
 def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> Ticket | None:
-    """Resume a paused ticket with the human's decision and finalize it.
-
-    Returns None if the ticket doesn't exist or isn't awaiting a human decision
-    (so an already-resolved/auto-finalized ticket can't be re-decided)."""
+    """Resume a paused ticket with the human's decision and finalize it."""
     ticket = db.get(Ticket, ticket_id)
     if ticket is None or not ticket.thread_id or ticket.status != "awaiting_approval":
         return None
@@ -174,6 +241,8 @@ def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> 
     if decision == "approve":
         _record_warranty_claim(db, ticket, decided_by=actor)
 
+    _emit(ticket.id, "ticket.resolved", {"decision": decision, "status": ticket.status})
+    _emit(ticket.id, "done", {"ticket_id": ticket.id})
     _audit(db, actor_type="human", actor_id=actor, action=f"decision:{decision}",
            resource_id=ticket.id, after={"status": ticket.status})
     db.commit()

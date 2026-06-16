@@ -14,6 +14,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app.config import get_settings
+from app.core.langgraph.domains.parts import parts_check, parts_recommend
+from app.core.langgraph.domains.recall import recall_assess, recall_draft_comms
 from app.core.langgraph.domains.warranty import (
     warranty_cost,
     warranty_fraud,
@@ -24,7 +26,7 @@ from app.core.langgraph.state import AfterSalesState
 from app.services.checkpoint import get_checkpointer
 
 # Domains that have a real pipeline today; others fall through to the stub.
-REAL_DOMAINS = {"warranty"}
+REAL_DOMAINS = {"warranty", "recall", "parts"}
 
 _FINAL_STATUS = {"approve": "resolved", "reject": "rejected", "escalate": "escalated"}
 
@@ -119,11 +121,22 @@ def finalize(state: AfterSalesState) -> dict:
 def build_graph():
     g = StateGraph(AfterSalesState)
     g.add_node("enrich", classify_and_enrich)
+
+    # Warranty pipeline
     g.add_node("warranty_validate", warranty_validate)
     g.add_node("warranty_fraud", warranty_fraud)
     g.add_node("warranty_recommend", warranty_recommend)
     g.add_node("warranty_cost", warranty_cost)
     g.add_node("auto_approve", auto_approve)
+
+    # Recall pipeline
+    g.add_node("recall_assess", recall_assess)
+    g.add_node("recall_draft_comms", recall_draft_comms)
+
+    # Parts pipeline
+    g.add_node("parts_check", parts_check)
+    g.add_node("parts_recommend", parts_recommend)
+
     g.add_node("stub", stub_domain)
     g.add_node("await_human", await_human)
     g.add_node("finalize", finalize)
@@ -131,8 +144,11 @@ def build_graph():
     g.add_edge(START, "enrich")
     g.add_conditional_edges(
         "enrich", domain_router,
-        {"warranty": "warranty_validate", "stub": "stub"},
+        {"warranty": "warranty_validate", "recall": "recall_assess",
+         "parts": "parts_check", "stub": "stub"},
     )
+
+    # Warranty flow
     g.add_edge("warranty_validate", "warranty_fraud")
     g.add_edge("warranty_fraud", "warranty_recommend")
     g.add_edge("warranty_recommend", "warranty_cost")
@@ -141,6 +157,18 @@ def build_graph():
         {"auto": "auto_approve", "human": "await_human"},
     )
     g.add_edge("auto_approve", "finalize")
+
+    # Recall flow — always requires human approval (safety decisions are never automated)
+    g.add_edge("recall_assess", "recall_draft_comms")
+    g.add_edge("recall_draft_comms", "await_human")
+
+    # Parts flow — in-stock can auto-resolve, out-of-stock needs human
+    g.add_edge("parts_check", "parts_recommend")
+    g.add_conditional_edges(
+        "parts_recommend", autonomy_router,
+        {"auto": "auto_approve", "human": "await_human"},
+    )
+
     g.add_edge("stub", "await_human")
     g.add_edge("await_human", "finalize")
     g.add_edge("finalize", END)

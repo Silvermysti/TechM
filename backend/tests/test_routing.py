@@ -13,8 +13,12 @@ def test_routes_warranty_to_warranty():
     assert domain_router({"domain": "warranty"}) == "warranty"
 
 
-def test_routes_unknown_domain_to_stub():
-    assert domain_router({"domain": "parts"}) == "stub"
+def test_routes_parts_to_parts():
+    assert domain_router({"domain": "parts"}) == "parts"
+
+
+def test_routes_recall_to_recall():
+    assert domain_router({"domain": "recall"}) == "recall"
 
 
 def test_routes_missing_domain_to_stub():
