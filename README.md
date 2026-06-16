@@ -1,135 +1,173 @@
-# Automotive After-Sales AI Command Center — Demo
+# Automotive After-Sales AI Command Center
 
-A working demo of **Plan B (Unified AI Command Center)**: a 3-tier agent hierarchy that
-automates automotive after-sales, with a **human in the loop** for every high-stakes
-decision. This repo currently implements **Phase 1 — the warranty vertical, end to end**.
-
-See `PLAN.md` for the full roadmap (Phases 0–4).
+A working demo of **Plan B (Unified AI Command Center)**: a 3-tier LangGraph agent hierarchy
+that automates automotive after-sales — warranty, recall, and parts — with a **human in the
+loop** for every high-stakes decision. Built for a Tech Mahindra internship project.
 
 ---
 
-## What works today (Phase 1)
+## What's built
 
-- **Guided intake** — a customer picks a category, describes the issue; the intake agent
-  asks a clarifying question if needed (bounded), then creates a ticket.
-- **Master orchestrator (LangGraph)** — classifies → routes → runs the **warranty**
-  domain (validate against the mock warranty DB → fraud check → recommendation) →
-  **pauses for human approval** (`interrupt()`) → finalizes.
-- **Customer Portal** — submit + live status tracker (polls).
-- **Manager Command Center** — KPIs, approval queue, full AI **reasoning chain**, and
-  Approve / Reject / Escalate (the human can override the AI).
+| Portal | Who uses it | What they can do |
+|--------|-------------|-----------------|
+| Customer | Vehicle owners | Guided intake chat · live status tracker · claim reference |
+| Manager | After-sales managers | Approval queue · AI reasoning chain · live agent monitor · audit log · performance trends |
+| Dealer | Technicians | Open warranty jobs · parts inventory |
+| Admin | Manufacturer ops | Recall management · trigger recall pipeline · audit log |
 
-Domains Recall/Parts (real) and Customer/Quality/Service (stub) + live SSE monitor land
-in Phase 2/3.
+**Domains implemented:**
+- **Warranty** (full) — validate coverage → fraud check → cost estimate → tiered auto-approve or human HITL
+- **Recall** (full) — assess severity → draft customer comms → human approval
+- **Parts** (full) — stock check → recommend reorder or service-ready
+- Customer / Quality / Service — stubbed (same interface, no LLM cost)
 
 ---
 
 ## Architecture
 
 ```
-Customer Portal ─┐                              ┌─ Manager Command Center
-                 │   FastAPI (REST)             │   (KPIs, approval queue, reasoning)
-                 └──────────►  api/v1  ◄────────┘
-                                  │
-                        services/graph_runner
-                                  │
-                  LangGraph Master Orchestrator
-        enrich → route → warranty(validate→fraud→recommend) → await_human → finalize
-                                  │
-                     Postgres/SQLite  +  Ollama/Groq/DeepSeek (via services/llm.py seam)
+Customer Portal ──┐                           ┌── Manager Command Center
+Dealer Portal  ──┤   FastAPI REST + SSE      ├── Admin Console
+Admin Console  ──┘   api/v1/                 └── (live agent monitor via EventSource)
+                          │
+               services/graph_runner
+                 (BackgroundTasks — returns immediately)
+                          │
+          LangGraph Master Orchestrator
+   enrich → route → domain pipeline → (auto-finalize | await_human interrupt) → finalize
+                          │
+            SQLite (dev) / Postgres (prod)
+            Groq / DeepSeek / Ollama  (via services/llm.py seam)
 ```
 
-- **Agents use structured output** (`with_structured_output`): the LLM returns a decision
-  object; our Python calls the DB tools. Deterministic and unit-testable.
-- **Provider seam** (`backend/app/services/llm.py`): one env var (`LLM_PROVIDER`) switches
-  between `ollama` (local, free), `groq`, and `deepseek` (hosted, OpenAI-compatible).
+**Key design choices:**
+- **Structured output, not tool-calling** — the LLM returns a Pydantic decision object; our Python calls DB tools. Deterministic + unit-testable.
+- **Human-in-the-loop via `interrupt()`** — the graph pauses at `await_human`; manager resumes with `Command(resume=...)`. Nothing high-stakes auto-finalizes.
+- **Tiered autonomy** — low-cost + high-confidence + low-fraud warranty claims auto-approve; everything else queues for review. Thresholds in `backend/app/config.py`.
+- **SSE live monitor** — agent steps are published to a thread-safe event bus; the Manager's Agent Monitor streams them via `EventSource` (no WebSocket).
+- **Background execution** — intake returns in milliseconds; the LangGraph pipeline runs in a FastAPI `BackgroundTask` with its own DB session.
+- **Data redaction** — customers receive `CustomerTicketOut` (no fraud scores, no internal trace); managers get the full `TicketOut`.
 
 ---
 
 ## Prerequisites
 
 - Python 3.12, Node 20+
-- An LLM provider — **one of**:
-  - **Ollama** (local, default): `ollama pull mistral` (mistral is non-reasoning and
-    reliably produces JSON; qwen3.5 reasoning models do not, locally).
-  - **Groq** or **DeepSeek** API key (recommended — fast + much better reasoning).
-- Postgres is optional; the demo defaults to SQLite so no DB server is needed.
+- **LLM provider (one of):**
+  - **Groq** API key — fast, free tier available, recommended for demos
+  - **DeepSeek** API key — strong reasoning models
+  - **Ollama** (local) — zero cost but slow on CPU; use `ollama pull mistral`
 
 ---
 
-## Run it
+## Run locally (SQLite, no Docker)
 
-### 1. Backend
+### Backend
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # then edit .env (provider, keys) — defaults to ollama+sqlite
-python -m app.seed.seed       # load the mock fleet
+cp .env.example .env          # fill in LLM_PROVIDER + key; defaults to groq
+python -m app.seed.seed       # seed the mock fleet
 uvicorn app.main:app --reload # http://localhost:8000  (/docs for the API)
 ```
 
-### 2. Frontend
+### Frontend
 ```bash
 cd frontend
 npm install
 npm run dev                   # http://localhost:3000
 ```
 
-### Switching to Groq / DeepSeek (recommended for a smooth demo)
-In `backend/.env`:
-```
-LLM_PROVIDER=groq            # or deepseek
-GROQ_API_KEY=...             # or DEEPSEEK_API_KEY=...
-```
-Model names per tier auto-default per provider (see `app/config.py`); override with
-`MODEL_FAST` / `MODEL_STANDARD` / `MODEL_COMPLEX` if desired.
-
-> **Note on local Ollama:** on CPU it works but is slow (~50s per LLM call, so ~2–3 min
-> per ticket) and mistral's reasoning is rough. Hosted Groq/DeepSeek is near-instant and
-> far more accurate — use it for live demos.
-
-### Postgres (optional, production parity)
-```bash
-docker compose up -d postgres
-# then in backend/.env set:
-# DATABASE_URL=postgresql+psycopg://aftersales:aftersales@localhost:5432/aftersales
-python -m app.seed.seed
-```
+Demo logins (after seeding):
+- Customer: `rajesh.demo@example.com` / `demo1234`
+- Manager: `manager@techmahindra.com` / `manager123`
 
 ---
 
-## Demo script
+## Run with Docker Compose (Postgres + backend + frontend)
 
-1. Open **http://localhost:3000** → **Customer Portal**.
-2. Pick **Warranty Issue**, keep the prefilled demo VIN `MA3DEMO00000SWIFT`, and send:
-   *"My AC stopped working 3 months after I bought my Swift VXI."*
-   → the agent logs a ticket and shows the status tracker.
-3. Open **Manager Command Center** in another tab → the ticket is in **Needs your
-   attention** with the full AI reasoning chain (validate → fraud → recommendation).
-4. Click **Approve** → the Customer Portal status flips to **Decision Made / resolved**.
+```bash
+cp backend/.env.example backend/.env    # fill in your LLM key
+docker compose up --build
+```
 
-The demo VIN is a Swift VXI purchased 90 days ago with valid AC warranty coverage. The
-Honda City 2023 recall cohort is also seeded, ready for the Phase 2 recall fan-out.
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000 · Docs: http://localhost:8000/docs
+
+The backend container seeds the database automatically on first start.
 
 ---
 
 ## Tests
 
 ```bash
-cd backend && source .venv/bin/activate && pytest      # 15 tests
+cd backend && source .venv/bin/activate && pytest
 ```
-Covers warranty eligibility, the bounded intake loop, orchestrator routing, the full
-LangGraph pause/resume cycle, and the ticket HTTP lifecycle. LLM calls are faked in
-tests so they run offline and fast.
+
+40 tests covering: warranty eligibility, intake loop, orchestrator routing, LangGraph
+pause/resume, ticket HTTP lifecycle, SSE event types, recall domain, parts domain, audit
+log, claims API. LLM calls are monkeypatched so tests run offline and fast.
+
+---
+
+## Demo walkthrough
+
+### Warranty claim (full HITL loop)
+1. Open http://localhost:3000 → **Login as Customer** (Rajesh)
+2. Pick **Warranty Issue**, describe: *"My AC stopped working 3 months after purchase"*
+3. The agent asks one clarifying question if needed, then creates a ticket (returns in ~1s)
+4. Switch to **Manager Portal** → the ticket appears in **Approval Queue** with the full AI
+   reasoning chain (validate → fraud → cost → recommendation)
+5. **Approve** → Customer Portal status flips to **resolved** with a claim reference number
+6. Manager **Trends** tab shows updated approval rate, automation rate, total claim cost
+
+### Recall pipeline
+1. Login as **Admin** → **Recall Management** tab
+2. Trigger a recall on the seeded RC-2026-BRK01 (brake recall)
+3. Manager receives a recall ticket in the Agent Monitor showing the draft comms
+
+### Parts check
+1. Login as **Dealer** → **Parts Inventory** tab — shows stock levels, ETA, supplier
+2. Out-of-stock parts are highlighted in red
+
+---
+
+## AWS-readiness map
+
+| Local component | AWS target |
+|----------------|-----------|
+| SQLite | Amazon RDS PostgreSQL / Aurora Serverless |
+| `uvicorn` process | ECS Fargate task (auto-scaling) |
+| `BackgroundTasks` | AWS SQS + Lambda / Celery worker on ECS |
+| SSE event bus (`services/events.py`) | API Gateway WebSocket / SQS fan-out |
+| `backend/uploads/` | Amazon S3 + CloudFront CDN |
+| `next dev` / standalone | ECS Fargate + CloudFront |
+| JWT in-process | Amazon Cognito (User Pools + tokens) |
+| `seed.py` one-time | RDS init via CodeBuild migration step |
+| `.env` secrets | AWS Secrets Manager / Parameter Store |
+| `docker compose` postgres | Aurora Multi-AZ |
 
 ---
 
 ## Layout
 
-- `backend/app/core/langgraph/` — orchestrator + domains (the agent graph)
-- `backend/app/tools/` — plain-Python tools the agents call (warranty/VIN lookups)
-- `backend/app/services/llm.py` — the provider seam
-- `backend/app/api/v1/` — REST endpoints (intake, tickets, decision)
-- `frontend/app/` — `/customer`, `/manager` (built), `/dealer`, `/admin` (Phase 3)
-- One deliberate demo shortcut: no real auth — a role launcher stands in for Cognito.
+```
+backend/
+  app/
+    api/v1/          — intake, tickets, claims, audit, recalls, parts, metrics, stream, auth
+    core/langgraph/  — orchestrator + domain nodes (warranty, recall, parts)
+    services/        — llm.py (provider seam), graph_runner.py, events.py (SSE bus), notify.py
+    tools/           — pure Python: warranty_check, cost_estimate, claim_history
+    models/          — SQLAlchemy ORM (tickets, claims, audit, recalls, parts, vehicles…)
+    schemas/         — Pydantic: LLM decision objects + API contracts + CustomerTicketOut
+    seed/            — seed.py: mock fleet of 32 customers, 50 vehicles, 6 parts, 1 recall
+frontend/
+  app/
+    customer/        — intake chat + status tracker
+    manager/         — approval queue + reasoning chain + trends + audit + agent monitor
+    dealer/          — open jobs + parts inventory
+    admin/           — recall management + audit
+    login/           — role switcher + quick demo accounts
+  lib/               — api.ts, auth.ts, useSSE.ts, types.ts
+```

@@ -115,6 +115,26 @@ export function triggerRecall(id: string): Promise<Ticket> {
   return jsonFetch<Ticket>(`/api/v1/recalls/${id}/trigger`, { method: "POST" });
 }
 
+export type DomainStat = {
+  domain: string; count: number; approved: number; rejected: number; avg_cost: number | null;
+};
+
+export type TrendMetrics = {
+  total_tickets: number;
+  auto_approved: number;
+  human_approved: number;
+  rejected: number;
+  awaiting: number;
+  failed: number;
+  avg_confidence: number | null;
+  total_claim_cost: number;
+  domains: DomainStat[];
+};
+
+export function getMetrics(): Promise<TrendMetrics> {
+  return jsonFetch<TrendMetrics>("/api/v1/metrics");
+}
+
 export function listAudit(params?: {
   ticket_id?: string;
   actor_type?: string;

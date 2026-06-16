@@ -7,9 +7,11 @@ import {
   closeClaim,
   decideTicket,
   getClaim,
+  getMetrics,
   listAudit,
   listTickets,
   payClaim,
+  type TrendMetrics,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTicketStream, type SSEEvent } from "@/lib/useSSE";
@@ -527,12 +529,126 @@ function AgentMonitor({ tickets }: { tickets: Ticket[] }) {
   );
 }
 
+function TrendsPanel() {
+  const [data, setData] = useState<TrendMetrics | null>(null);
+
+  useEffect(() => {
+    getMetrics().then(setData).catch(() => null);
+  }, []);
+
+  if (!data) {
+    return <p className="mt-8 text-center text-sm text-faint">Loading metrics…</p>;
+  }
+
+  const totalDecided = data.auto_approved + data.human_approved + data.rejected;
+  const autoRate = totalDecided > 0 ? Math.round((data.auto_approved / totalDecided) * 100) : 0;
+  const approvalRate = totalDecided > 0
+    ? Math.round(((data.auto_approved + data.human_approved) / totalDecided) * 100)
+    : 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow">Total tickets</p>
+          <p className="mt-1 font-display text-2xl font-bold text-ink">{data.total_tickets}</p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow text-ok">Approval rate</p>
+          <p className="mt-1 font-display text-2xl font-bold text-ok">{approvalRate}%</p>
+          <p className="mt-1 text-[11px] text-faint">
+            {data.auto_approved} auto · {data.human_approved} human
+          </p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow text-techm">Automation rate</p>
+          <p className="mt-1 font-display text-2xl font-bold text-techm">{autoRate}%</p>
+          <p className="mt-1 text-[11px] text-faint">claims finalized without human</p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow">Total claim cost</p>
+          <p className="mt-1 font-display text-2xl font-bold text-ink">
+            ₹{data.total_claim_cost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+          </p>
+          {data.avg_confidence !== null && (
+            <p className="mt-1 text-[11px] text-faint">
+              avg confidence {Math.round(data.avg_confidence * 100)}%
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="border-b border-line bg-raised px-4 py-2.5">
+          <p className="eyebrow">Domain breakdown</p>
+        </div>
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-line bg-raised">
+              {["Domain", "Tickets", "Approved", "Rejected", "Avg Claim"].map((h) => (
+                <th key={h} className="px-4 py-2.5 font-mono text-[10px] uppercase tracking-wider text-faint">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.domains.map((d) => (
+              <tr key={d.domain} className="border-b border-line last:border-0 hover:bg-raised">
+                <td className="px-4 py-2.5">
+                  <span className="chip capitalize">{d.domain}</span>
+                </td>
+                <td className="px-4 py-2.5 font-mono tabular-nums text-ink">{d.count}</td>
+                <td className="px-4 py-2.5">
+                  <span className="text-ok font-semibold">{d.approved}</span>
+                  {d.count > 0 && (
+                    <span className="ml-1.5 text-[11px] text-faint">
+                      ({Math.round((d.approved / d.count) * 100)}%)
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className={d.rejected > 0 ? "text-danger font-semibold" : "text-faint"}>
+                    {d.rejected}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 font-mono tabular-nums text-muted">
+                  {d.avg_cost !== null
+                    ? `₹${d.avg_cost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                    : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow text-warn">Awaiting approval</p>
+          <p className="mt-1 font-display text-2xl font-bold text-warn">{data.awaiting}</p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow text-danger">Failed runs</p>
+          <p className="mt-1 font-display text-2xl font-bold text-danger">{data.failed}</p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow">Rejected</p>
+          <p className="mt-1 font-display text-2xl font-bold text-ink">{data.rejected}</p>
+        </div>
+        <div className="card px-4 py-3.5">
+          <p className="eyebrow text-ok">Auto-finalized</p>
+          <p className="mt-1 font-display text-2xl font-bold text-ok">{data.auto_approved}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ManagerPortal() {
   const { session, ready } = useAuth(["manager"]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"queue" | "audit" | "monitor">("queue");
+  const [tab, setTab] = useState<"queue" | "audit" | "monitor" | "trends">("queue");
 
   const refresh = useCallback(async () => {
     try {
@@ -595,7 +711,7 @@ export default function ManagerPortal() {
         </div>
 
         <div className="mt-5 flex gap-1 border-b border-line">
-          {(["queue", "monitor", "audit"] as const).map((t) => (
+          {(["queue", "monitor", "trends", "audit"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -605,7 +721,10 @@ export default function ManagerPortal() {
                   : "text-muted hover:text-ink"
               }`}
             >
-              {t === "queue" ? "Approval Queue" : t === "monitor" ? "Agent Monitor" : "Audit Log"}
+              {t === "queue" ? "Approval Queue"
+                : t === "monitor" ? "Agent Monitor"
+                : t === "trends" ? "Performance Trends"
+                : "Audit Log"}
             </button>
           ))}
         </div>
@@ -617,6 +736,10 @@ export default function ManagerPortal() {
         ) : tab === "monitor" ? (
           <div className="mt-5">
             <AgentMonitor tickets={tickets} />
+          </div>
+        ) : tab === "trends" ? (
+          <div className="mt-5">
+            <TrendsPanel />
           </div>
         ) : (
           <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
