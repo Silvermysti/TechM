@@ -20,11 +20,14 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         "fast": "mistral:latest",
         "standard": "mistral:latest",
         "complex": "mistral:latest",
+        "vision": "llava:latest",
     },
     "groq": {
         "fast": "llama-3.1-8b-instant",
         "standard": "llama-3.3-70b-versatile",
         "complex": "llama-3.3-70b-versatile",
+        # llama-4-scout supports vision (image_url content blocks) and json_object mode.
+        "vision": "meta-llama/llama-4-scout-17b-16e-instruct",
     },
     "deepseek": {
         "fast": "deepseek-chat",
@@ -33,6 +36,7 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         # our function-calling structured output requires, so the chat model is
         # used for the complex tier too. Override via MODEL_COMPLEX if needed.
         "complex": "deepseek-chat",
+        "vision": "deepseek-chat",
     },
 }
 
@@ -55,6 +59,7 @@ class Settings(BaseSettings):
     model_fast: str = ""
     model_standard: str = ""
     model_complex: str = ""
+    model_vision: str = ""
     ollama_host: str = "http://localhost:11434"
 
     # Database
@@ -92,6 +97,7 @@ class Settings(BaseSettings):
             "fast": self.model_fast,
             "standard": self.model_standard,
             "complex": self.model_complex,
+            "vision": self.model_vision,
         }.get(tier, "")
         if override:
             return override

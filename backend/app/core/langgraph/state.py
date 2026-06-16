@@ -29,3 +29,4 @@ class AfterSalesState(TypedDict, total=False):
     final_status: str | None
     escalated: bool
     error: str | None
+    attachment_ids: list[str]

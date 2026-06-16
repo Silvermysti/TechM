@@ -9,18 +9,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # --------------------------------------------------------------------------- #
 # LLM decision objects (structured output)
 # --------------------------------------------------------------------------- #
 class ExtractedFields(BaseModel):
-    vin: str | None = None
-    component: str | None = Field(
-        None, description="affected part, e.g. ac, brakes, engine"
+    vin: str = Field("", description="VIN if mentioned, else empty string")
+    component: str = Field(
+        "", description="affected part, e.g. ac, brakes, engine; empty if unknown"
     )
-    symptom: str | None = None
-    onset: str | None = Field(None, description="when the problem started")
+    symptom: str = Field("", description="symptom description; empty if unknown")
+    onset: str = Field("", description="when the problem started; empty if unknown")
 
 
 class IntakeDecision(BaseModel):
@@ -29,14 +29,28 @@ class IntakeDecision(BaseModel):
     enough_info: bool = Field(
         description="true if we have enough to create and route a ticket"
     )
-    follow_up_question: str | None = Field(
-        None, description="one clarifying question to ask if not enough info"
+    follow_up_question: str = Field(
+        "",
+        description=(
+            "Single clarifying question — use only when exactly one thing is missing. "
+            "Use follow_up_bullets instead when two or more things are needed. "
+            "Empty string if not applicable."
+        ),
+    )
+    follow_up_bullets: list[str] = Field(
+        default_factory=list,
+        description=(
+            "All missing items as short bullet strings. Use when two or more things "
+            "are needed so the customer can answer everything in one reply. "
+            "E.g. ['Which part is affected?', 'When did this start?', 'Odometer (km)?']. "
+            "If a photo would help, add it as the last bullet."
+        ),
     )
     domain: Literal[
         "warranty", "recall", "parts", "customer", "quality", "service"
-    ] | None = None
-    apqc_process: str | None = Field(None, description="APQC ref, e.g. 6.7.3")
-    summary: str | None = Field(None, description="one-line summary of the issue")
+    ] = Field("warranty", description="most likely domain for this issue")
+    apqc_process: str = Field("", description="APQC ref e.g. 6.7.3; empty if unknown")
+    summary: str = Field("", description="one-line summary of the issue; empty if unknown")
     extracted: ExtractedFields = Field(default_factory=ExtractedFields)
     request_image: bool = Field(
         False,
@@ -44,6 +58,29 @@ class IntakeDecision(BaseModel):
             "true when the issue would be visible in a photograph and the customer "
             "has not attached one yet"
         ),
+    )
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def normalise_domain(cls, v: object) -> object:
+        return v.lower() if isinstance(v, str) else v
+
+
+class EvidenceAssessment(BaseModel):
+    """Vision AI output: assessment of a customer-submitted evidence photo."""
+
+    photo_matches_claim: bool = Field(
+        description="true if the photo content is consistent with the reported component and symptom"
+    )
+    damage_visible: bool = Field(
+        description="true if visible damage, wear, or malfunction evidence is present in the image"
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0,
+        description="how confident you are in this assessment (0.0 = cannot tell, 1.0 = certain)"
+    )
+    notes: str = Field(
+        description="one or two sentences describing what is visible in the photo"
     )
 
 
@@ -58,6 +95,11 @@ class WarrantyRecommendation(BaseModel):
     reasoning: str
     draft_email: str
 
+    @field_validator("decision", mode="before")
+    @classmethod
+    def normalise_decision(cls, v: object) -> object:
+        return v.lower() if isinstance(v, str) else v
+
 
 # --------------------------------------------------------------------------- #
 # API contracts
@@ -65,6 +107,13 @@ class WarrantyRecommendation(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    phone: str = ""
 
 
 class VehicleOut(BaseModel):
@@ -120,6 +169,30 @@ class AttachmentOut(BaseModel):
     id: str
     url: str
     filename: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VINClaimRequest(BaseModel):
+    vin: str
+    rc_attachment_id: str | None = None
+
+
+class VINClaimResult(BaseModel):
+    status: Literal["registered", "already_owned", "transfer_requested"]
+    vin: str
+    transfer_id: str | None = None
+
+
+class VINTransferOut(BaseModel):
+    id: str
+    vin: str
+    requester_name: str
+    requester_email: str
+    current_owner_id: str | None = None
+    rc_attachment_id: str | None = None
+    status: str
+    requested_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

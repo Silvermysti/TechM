@@ -8,7 +8,7 @@ from app.core.langgraph.intake import next_intake_step
 from app.schemas import IntakeDecision, ExtractedFields
 
 
-def _decision(enough, q=None, domain=None):
+def _decision(enough, q="", domain="warranty"):
     return IntakeDecision(
         enough_info=enough,
         follow_up_question=q,

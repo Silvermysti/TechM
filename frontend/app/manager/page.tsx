@@ -159,28 +159,59 @@ function StepOutputTable({ output }: { output: unknown }) {
   );
 }
 
-function AgentTraceTimeline({ trace }: { trace: AgentOutput[] }) {
+function AgentTraceTimeline({
+  trace,
+  attachments,
+}: {
+  trace: AgentOutput[];
+  attachments?: import("@/lib/types").Attachment[];
+}) {
   return (
     <div className="timeline">
-      {trace.map((step, i) => (
-        <div key={i} className="timeline-item">
-          <span className="timeline-node" />
-          <div className="rounded-xl border border-line bg-raised p-3.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="flex h-5 w-5 flex-none items-center justify-center rounded font-mono text-[9px] font-bold bg-techm-soft text-techm">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="text-[13px] font-semibold text-ink">
-                {agentLabel(step.agent)}
-              </span>
-              {step.apqc && (
-                <span className="chip ml-auto text-[9px]">APQC {step.apqc}</span>
+      {trace.map((step, i) => {
+        const isEvidence = step.agent === "Evidence Assessment Specialist";
+        return (
+          <div key={i} className="timeline-item">
+            <span className="timeline-node" />
+            <div className="rounded-xl border border-line bg-raised p-3.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="flex h-5 w-5 flex-none items-center justify-center rounded font-mono text-[9px] font-bold bg-techm-soft text-techm">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="text-[13px] font-semibold text-ink">
+                  {agentLabel(step.agent)}
+                </span>
+                {step.apqc && (
+                  <span className="chip ml-auto text-[9px]">APQC {step.apqc}</span>
+                )}
+              </div>
+              {/* Show evidence photo inline in the evidence assessment step */}
+              {isEvidence && attachments && attachments.length > 0 && (
+                <div className="mt-2.5 flex items-start gap-3">
+                  <a
+                    href={`${API_BASE}${attachments[0].url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group flex-none overflow-hidden rounded-lg border border-line transition hover:border-techm"
+                    title={attachments[0].filename}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`${API_BASE}${attachments[0].url}`}
+                      alt={attachments[0].filename}
+                      className="h-20 w-20 object-cover transition group-hover:scale-105"
+                    />
+                  </a>
+                  <div className="min-w-0 flex-1">
+                    <StepOutputTable output={step.output} />
+                  </div>
+                </div>
               )}
+              {!isEvidence && <StepOutputTable output={step.output} />}
             </div>
-            <StepOutputTable output={step.output} />
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -458,7 +489,10 @@ function TicketDetailPanel({
         <div>
           <p className="eyebrow mb-3">Agent Reasoning Chain</p>
           {ticket.agent_trace && ticket.agent_trace.length > 0 ? (
-            <AgentTraceTimeline trace={ticket.agent_trace} />
+            <AgentTraceTimeline
+              trace={ticket.agent_trace}
+              attachments={ticket.attachments}
+            />
           ) : (
             <p className="rounded-xl border border-dashed border-line p-4 text-sm text-faint">
               No trace recorded for this ticket.

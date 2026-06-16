@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, get_current_principal
 from app.config import get_settings
-from app.core.langgraph.intake import next_intake_step
+from app.core.langgraph.intake import format_follow_up, next_intake_step
 from app.db.session import get_db
 from app.models import Attachment, IntakeSession, Vehicle
 from app.schemas import AttachmentOut, IntakeMessage, IntakeReply
@@ -60,8 +60,9 @@ async def upload_evidence(
     principal: Principal = Depends(get_current_principal),
 ) -> Attachment:
     """Store one evidence photo for an intake chat session."""
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image uploads are accepted.")
+    ct = file.content_type or ""
+    if not (ct.startswith("image/") or ct == "application/pdf"):
+        raise HTTPException(status_code=400, detail="Only images and PDFs are accepted.")
 
     data = await file.read(_MAX_UPLOAD_BYTES + 1)
     if len(data) > _MAX_UPLOAD_BYTES:
@@ -131,7 +132,7 @@ def intake(
     )
 
     if not proceed:
-        question = decision.follow_up_question or "Could you tell me a bit more?"
+        question = format_follow_up(decision)
         history.append({"role": "assistant", "content": question})
         session.history = history
         session.asked += 1

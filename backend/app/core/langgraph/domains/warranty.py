@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.core.langgraph.state import AfterSalesState
-from app.schemas import FraudAssessment, WarrantyRecommendation
+from app.schemas import EvidenceAssessment, FraudAssessment, WarrantyRecommendation
 
 FRAUD_SYSTEM = """You are a warranty fraud-detection specialist. Estimate the \
 probability (0.0-1.0) that this claim is fraudulent or anomalous.
@@ -30,6 +30,18 @@ Use ONLY the facts provided. Never invent prior claims, mileage, or history. If 
 claim history shows no prior claims and nothing in the description is anomalous, the
 fraud score must be LOW (<= 0.1). Give one or two sentences naming the specific signal
 you scored on (or stating that none was found)."""
+
+EVIDENCE_SYSTEM = """You are a vehicle damage assessment specialist reviewing a \
+customer-submitted photo as part of a warranty claim evaluation.
+
+Assess whether the photo provides credible visual evidence for the reported issue. Be \
+objective and precise. A photo matches the claim if it shows the correct vehicle \
+component in a state consistent with the described symptom. Damage is visible if \
+there is clear evidence of failure, wear, breakage, or malfunction.
+
+Do not invent details that are not visible. If the image is blurry, off-topic, or \
+does not show the relevant component, say so in your notes and set confidence low. \
+Coverage and policy rules are NOT your concern — only describe what you can see."""
 
 RECOMMEND_SYSTEM = """You are a warranty claims specialist producing a RECOMMENDATION \
 for a human reviewer (you never finalize a payout yourself). Read the validation \
@@ -57,6 +69,80 @@ def _append_output(state: AfterSalesState, entry: dict) -> list[dict]:
     outputs = list(state.get("agent_outputs") or [])
     outputs.append(entry)
     return outputs
+
+
+def _load_first_image(attachment_ids: list[str]) -> tuple[str, str] | None:
+    """Return (base64_data, content_type) for the first image attachment, or None."""
+    import base64
+    from pathlib import Path
+
+    from app.db.session import SessionLocal
+    from app.models import Attachment
+
+    db = SessionLocal()
+    try:
+        att = db.get(Attachment, attachment_ids[0])
+        if att is None or not att.stored_name:
+            return None
+        stored_name = att.stored_name
+        content_type = att.content_type or "image/jpeg"
+    finally:
+        db.close()
+
+    upload_dir = Path(__file__).resolve().parents[4] / "uploads"
+    img_path = upload_dir / stored_name
+    if not img_path.exists():
+        return None
+
+    return base64.b64encode(img_path.read_bytes()).decode(), content_type
+
+
+def warranty_evidence(state: AfterSalesState) -> dict:
+    """Assess customer evidence photo using vision AI (Groq llama-4-scout).
+
+    Runs only when the ticket has attached images. Skips silently when no
+    photos are present — the rest of the pipeline is unaffected either way.
+    Photo assessment feeds the fraud and recommend nodes via state['context']['evidence'].
+    """
+    from app.services import llm
+
+    attachment_ids = state.get("attachment_ids") or []
+    if not attachment_ids:
+        return {}
+
+    image_data = _load_first_image(attachment_ids)
+    if image_data is None:
+        return {}
+
+    image_b64, image_type = image_data
+    user_prompt = (
+        f"Warranty claim summary: {state.get('summary')}\n"
+        f"Reported component: {state.get('component') or 'unknown'}\n\n"
+        "Assess the attached photo as evidence for this claim."
+    )
+
+    assessment: EvidenceAssessment = llm.decide_vision(
+        EvidenceAssessment,
+        system=EVIDENCE_SYSTEM,
+        image_b64=image_b64,
+        image_type=image_type,
+        user=user_prompt,
+    )
+
+    context = dict(state.get("context") or {})
+    context["evidence"] = assessment.model_dump()
+
+    return {
+        "context": context,
+        "agent_outputs": _append_output(
+            state,
+            {
+                "agent": "Evidence Assessment Specialist",
+                "apqc": "6.7.3.3",
+                "output": assessment.model_dump(),
+            },
+        ),
+    }
 
 
 def warranty_validate(state: AfterSalesState) -> dict:

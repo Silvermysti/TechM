@@ -25,20 +25,28 @@ VIN normally comes from the customer's profile. Decide the domain (warranty, rec
 parts, customer, quality, service) and the APQC process reference when possible \
 (e.g. warranty claims = 6.7.3).
 
-Photo evidence policy: a "[photo attached]" line in the conversation means the \
-customer has already provided one. If the issue is one that would be VISIBLE in a \
-photograph (body damage, dents, cracked or broken parts, fluid leaks, corrosion, \
-worn tyres, a dashboard warning light) and no photo has been attached yet, set \
-request_image=true, set enough_info=false, and politely ask for a photo in your \
-follow_up_question (you may combine it with any other missing detail). If the issue \
-cannot be seen in a photo (AC not cooling, unusual noises, vibration, intermittent \
-electrical faults, performance problems), set request_image=false and do not ask for \
-one. Never ask for a photo more than once: if you already asked, or the customer \
-declines or cannot provide one, proceed without it.
+FOLLOW-UP RULE — ask for everything at once, never one item at a time:
+- If TWO OR MORE things are missing, populate follow_up_bullets with one short \
+bullet string per missing item. Leave follow_up_question null.
+- If EXACTLY ONE thing is missing, put it in follow_up_question and leave \
+follow_up_bullets empty.
+- Never ask for something the customer already provided.
+- Keep bullets short — 5 to 8 words each.
 
-If something essential is missing, set enough_info=false and give ONE short, friendly \
-follow_up_question. Otherwise set enough_info=true and fill domain, summary, and the \
-extracted fields."""
+Example follow_up_bullets when component, onset date, and odometer are missing:
+["Which part is affected? (e.g. AC, brakes, engine)",
+ "When did this first happen?",
+ "Current odometer reading (km)?"]
+
+Photo evidence policy: a "[photo attached]" line means the customer already provided \
+one. If the issue WOULD BE VISIBLE in a photo (body damage, dents, cracks, leaks, \
+corrosion, worn tyres, dashboard warning lights) and no photo is attached yet, add a \
+photo bullet as the LAST item in follow_up_bullets and set request_image=true. Do NOT \
+ask for a photo for invisible issues (AC not cooling, noises, vibration, intermittent \
+faults). Never ask for a photo more than once.
+
+If everything needed is present, set enough_info=true and fill domain, summary, and \
+the extracted fields."""
 
 
 def _format_history(history: list[dict]) -> str:
@@ -62,7 +70,7 @@ def next_intake_step(
     *,
     decider: Decider | None = None,
     known_vin: str | None = None,
-    max_followups: int = 2,
+    max_followups: int = 1,
 ) -> tuple[IntakeDecision, bool]:
     """Evaluate the conversation and decide whether to proceed.
 
@@ -83,7 +91,16 @@ def next_intake_step(
     decision = decider(eval_history)
 
     if asked_count >= max_followups:
-        # Bounded: stop asking and proceed with what we have.
         return decision, True
 
     return decision, bool(decision.enough_info)
+
+
+def format_follow_up(decision: "IntakeDecision") -> str:
+    """Return the agent's follow-up message — bullets when multiple items missing,
+    single question otherwise."""
+    from app.schemas import IntakeDecision  # local import avoids circular
+    if decision.follow_up_bullets:
+        lines = "\n".join(f"• {b}" for b in decision.follow_up_bullets)
+        return f"Just a few more details:\n{lines}"
+    return decision.follow_up_question or "Could you tell me a bit more?"

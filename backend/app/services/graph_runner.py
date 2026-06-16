@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.langgraph.orchestrator import resume_run, start_run
-from app.models import AgentExecution, AuditLog, Customer, Recall, Ticket
+from app.models import AgentExecution, Attachment, AuditLog, Customer, Recall, Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,12 @@ def run_ticket_graph(ticket_id: str, *, extra_context: dict | None = None) -> No
             logger.error("run_ticket_graph: ticket %s not found", ticket_id)
             return
 
+        attachment_ids = [
+            a.id for a in db.query(Attachment.id)
+            .filter(Attachment.ticket_id == ticket_id)
+            .all()
+        ]
+
         state = {
             "request_id": ticket.id,
             "input_text": ticket.summary,
@@ -178,6 +184,7 @@ def run_ticket_graph(ticket_id: str, *, extra_context: dict | None = None) -> No
             "summary": ticket.summary,
             "apqc_process": ticket.apqc_process,
             "context": extra_context or {},
+            "attachment_ids": attachment_ids,
         }
         _emit(ticket.id, "agent.started", {"domain": ticket.domain})
         try:

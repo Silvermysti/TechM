@@ -29,8 +29,11 @@ const MANAGER_NAV: NavSection[] = [
 
 const CUSTOMER_NAV: NavSection[] = [
   {
-    section: "Self-service",
-    items: [{ href: "/customer", label: "My Requests", code: "01" }],
+    section: "My Portal",
+    items: [
+      { href: "/customer",          label: "Home",        code: "00" },
+      { href: "/customer/requests", label: "My Requests", code: "01" },
+    ],
   },
 ];
 

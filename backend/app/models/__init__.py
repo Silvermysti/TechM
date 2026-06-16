@@ -68,12 +68,35 @@ class Vehicle(Base):
     __tablename__ = "vehicles"
 
     vin: Mapped[str] = mapped_column(String(17), primary_key=True)
-    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"))
-    model: Mapped[str] = mapped_column(String(80))
-    year: Mapped[int] = mapped_column(Integer)
-    purchase_date: Mapped[date] = mapped_column(Date)
+    customer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customers.id"), nullable=True
+    )
+    model: Mapped[str] = mapped_column(String(80), default="Unknown")
+    year: Mapped[int] = mapped_column(Integer, default=0)
+    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    customer: Mapped["Customer"] = relationship(back_populates="vehicles")
+    customer: Mapped["Customer | None"] = relationship(back_populates="vehicles")
+
+
+class VINTransferRequest(Base):
+    """Pending ownership transfer when a VIN is claimed by someone other than the
+    current registered owner. Approved by a manager after verifying the RC document."""
+
+    __tablename__ = "vin_transfer_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    vin: Mapped[str] = mapped_column(String(17), index=True)
+    requester_id: Mapped[str] = mapped_column(ForeignKey("customers.id"))
+    current_owner_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    rc_attachment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decided_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    requester: Mapped["Customer"] = relationship(foreign_keys=[requester_id])
 
 
 class WarrantyPolicy(Base):

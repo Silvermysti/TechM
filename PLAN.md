@@ -311,6 +311,171 @@ Each maps to a real APQC 6.7 process. **Decision: planned, build later** — no 
 
 ---
 
+### PHASE 1.6 — Vehicle ownership & self-registration ⏳ **PLANNED**
+*Goal: real people buy second-hand cars and change ownership. The system must support new user
+sign-up, VIN self-registration, and safe ownership transfers without a government API.*
+
+**Context / motivation:**
+- Currently every customer + VIN is hard-coded in `seed.py`. A live demo (or any real user)
+  has no way to create an account or register a vehicle they bought.
+- Second-hand purchases mean a VIN may already be in the DB under the original owner.
+  The old owner must lose access the moment a verified transfer is approved — not before,
+  not after. Until approval, only the current owner can file claims.
+- Without VAHAN API access (India's national vehicle registry) we cannot programmatically
+  verify ownership, so the flow uses RC document upload + manager (human-in-the-loop) review.
+  When vision (C9) is added later, the AI can read the RC automatically.
+
+**Flow design:**
+
+```
+New user → POST /auth/register → account created, no vehicles yet
+                 │
+                 └─► POST /api/v1/vehicles/claim  (VIN + optional RC photo)
+                           │
+                           ├─ VIN not in DB          → auto-register (no prior owner)
+                           │                            vehicle.customer_id = new owner
+                           │
+                           ├─ VIN owned by same user  → 409 "already registered"
+                           │
+                           └─ VIN owned by another    → create VINTransferRequest (pending)
+                                                         old owner: read-only, cannot file new claims
+                                                         manager reviews RC photo → approve / reject
+                                                         on approve: vehicle.customer_id flips
+                                                         on reject:  request closed, old owner restored
+```
+
+**What to build:**
+
+**1.6.1 — New user registration** (`api/v1/auth.py`)
+- [ ] `POST /api/v1/auth/register` — `{name, email, password, phone?}` → creates `Customer`,
+      returns JWT (same shape as login response). Email uniqueness enforced.
+- [ ] Frontend `app/login/page.tsx` — "Create account" toggle on the login page; form sends to register.
+- **[TDD]** `tests/test_auth.py` — register → login → token valid; duplicate email → 409.
+
+**1.6.2 — VIN claim endpoint** (`api/v1/vehicles.py`)
+- [ ] New `VINTransferRequest` model: `id, vin, requester_id, current_owner_id, rc_attachment_id,
+      status (pending|approved|rejected), requested_at, decided_at, decided_by`.
+- [ ] `POST /api/v1/vehicles/claim` (customer-scoped):
+      - Body: `{vin, rc_attachment_id?}` (RC photo uploaded via existing `/intake/upload` first).
+      - Returns: `{status: "registered"|"transfer_requested"}` + vehicle or transfer record.
+- [ ] `GET /api/v1/vehicles` — list vehicles for current customer.
+- **[TDD]** three cases: new VIN, own VIN, transfer.
+
+**1.6.3 — Transfer approval** (`api/v1/vehicles.py` + manager portal)
+- [ ] `GET /api/v1/vehicles/transfers` (manager) — list pending transfers with RC attachment link.
+- [ ] `POST /api/v1/vehicles/transfers/{id}/approve` → flips `vehicle.customer_id`.
+- [ ] `POST /api/v1/vehicles/transfers/{id}/reject` → closes the request.
+- [ ] Manager portal: new "Vehicle Transfers" tab showing pending requests, RC photo preview,
+      Approve / Reject buttons.
+- **[TDD]** approve flips ownership; old owner can no longer file claims on that VIN.
+
+**1.6.4 — Seed & login page cleanup**
+- [ ] Expand `seed.py` with more models, components, and a broader coverage list so demo queries
+      don't hit hard coverage-rejection edges (see gap analysis above).
+- [ ] Login page: add "Register" path; quick-demo accounts stay for convenience.
+
+**✅ Demoable:** a new visitor registers, enters a VIN for a second-hand car, uploads an RC
+photo, manager approves the transfer → original owner can no longer claim on that VIN → new
+owner submits a warranty claim successfully.
+
+**Open questions (settle before building):**
+1. Should "auto-register" (VIN not yet in DB) require manager approval too, or fully self-service?
+   *Current plan: fully self-service — no prior owner means no dispute.*
+2. During a pending transfer, should the original owner still be able to file claims?
+   *Current plan: yes — until transfer is approved, they retain full access.*
+3. When vision (C9) is added: RC is read by AI → name/VIN extracted → auto-approve if match.
+   Flag this as the future upgrade path in code comments.
+
+---
+
+### PHASE 1.7 — Smarter intake: bulk follow-ups + contextual uploads ⏳ **PLANNED**
+*Goal: cut the back-and-forth to one exchange, reduce token cost, and make image upload
+a visible first-class feature rather than a hidden paperclip. No forms — pure chat.*
+
+**Context / motivation:**
+- Currently the intake agent asks ONE follow-up question per turn (bounded at 2 turns). If
+  three fields are missing the customer must reply three separate times — wasting tokens and
+  patience. The agent should ask for everything at once as a compact bullet list.
+- The photo upload button is hidden in a paperclip icon. Customers miss it. Different contexts
+  need different evidence (component photo for warranty, RC doc for VIN transfer, invoice for
+  parts) — the UI should surface the right prompt before the customer even types.
+
+**Design: pure chat, agent communicates efficiently**
+
+```
+Customer types: "My AC stopped working"
+        │
+        ▼
+Agent: "Got it — a few more details:
+        • Which vehicle? (model if not already shown)
+        • When did this start?
+        • Current odometer (km)?
+        • Photo of the affected part helps — attach one if you can 📎"
+        │
+        ▼
+Customer replies with all of the above in one message + optional photo
+        │
+        ▼
+Agent: enough_info=true → ticket created
+```
+
+**1.7.1 — Bulk follow-up bullets** (`schemas/__init__.py` + `core/langgraph/intake.py`)
+- [ ] Extend `IntakeDecision` schema with:
+  ```python
+  follow_up_bullets: list[str] = Field(
+      default_factory=list,
+      description=(
+          "All missing items as short bullet strings — use when two or more things "
+          "are needed. E.g. ['When did it start?', 'Odometer reading (km)?']. "
+          "Leave empty and use follow_up_question for single-item cases."
+      )
+  )
+  ```
+- [ ] Update `INTAKE_SYSTEM` prompt: instruct the agent to collect ALL missing fields in one
+  reply as a bulleted list, never one at a time. If a photo would help, add it as the last
+  bullet. Example:
+  ```
+  Need a bit more:
+  • Which part is affected? (e.g. AC, brakes, engine)
+  • When did you first notice this?
+  • Odometer reading (km)?
+  • A photo of the affected part if you have one 📎
+  ```
+- [ ] `next_intake_step()`: when `follow_up_bullets` is non-empty, join as a markdown bullet
+  string and return that as the reply; otherwise fall back to `follow_up_question`.
+- [ ] Lower `max_followups` from 2 → 1 — bulk bullets mean one exchange should always suffice.
+- [ ] **[TDD]** assert multiple missing fields → `follow_up_bullets` has ≥ 2 items; assert a
+  complete first message → `enough_info=true`, no follow-up.
+
+**1.7.2 — Contextual upload prompt** (`frontend/app/customer/page.tsx` + `api/v1/intake.py`)
+- [ ] Show the upload zone above the chat input as soon as a category is selected — not hidden.
+  Label and hint text change by category:
+  - Warranty / Service → *"Photo of the broken part (optional — speeds up approval)"*
+  - Parts query → *"Invoice or diagnostic report (optional)"*
+  - VIN registration (Phase 1.6) → *"RC document — required for transfer requests"*
+  - Recall check → hide the upload zone (nothing to attach)
+- [ ] Accept images AND PDF. Extend `upload_evidence` backend to allow `application/pdf`
+  alongside `image/*`. Frontend shows filename chip for PDFs, thumbnail for images.
+- [ ] When the agent sets `request_image=true` in a follow-up bullet, pulse-highlight the
+  upload zone so the customer notices they need to attach something.
+
+**1.7.3 — Token budget visibility** (`core/langgraph/intake.py`)
+- [ ] Store char count of each intake exchange on `IntakeSession` as a token proxy (or use
+  provider `usage` metadata if available). Surface in the performance trends panel as
+  avg tokens per ticket type.
+
+**✅ Demoable:** customer types "My AC stopped working" → agent replies with a 3-bullet list
+(component, onset date, odometer + photo prompt) → customer answers all in one message →
+ticket created. One round-trip total.
+
+**Open questions (settle before building):**
+1. Keep `follow_up_question` alongside `follow_up_bullets` in the schema, or remove it?
+   Recommendation: keep as fallback for the single-missing-field case.
+2. PDF upload: manager portal needs inline viewer or download link?
+   Recommendation: download link for now.
+
+---
+
 ### PHASE 2 — Cross-domain recall + live monitor (THE "WOW") ⏸ **PAUSED** (per scope update)
 *Goal: one recall trigger fans out across recall + warranty + parts, visibly, in real time.*
 

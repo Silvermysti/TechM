@@ -18,6 +18,7 @@ from app.core.langgraph.domains.parts import parts_check, parts_recommend
 from app.core.langgraph.domains.recall import recall_assess, recall_draft_comms
 from app.core.langgraph.domains.warranty import (
     warranty_cost,
+    warranty_evidence,
     warranty_fraud,
     warranty_recommend,
     warranty_validate,
@@ -123,6 +124,7 @@ def build_graph():
     g.add_node("enrich", classify_and_enrich)
 
     # Warranty pipeline
+    g.add_node("warranty_evidence", warranty_evidence)
     g.add_node("warranty_validate", warranty_validate)
     g.add_node("warranty_fraud", warranty_fraud)
     g.add_node("warranty_recommend", warranty_recommend)
@@ -144,11 +146,12 @@ def build_graph():
     g.add_edge(START, "enrich")
     g.add_conditional_edges(
         "enrich", domain_router,
-        {"warranty": "warranty_validate", "recall": "recall_assess",
+        {"warranty": "warranty_evidence", "recall": "recall_assess",
          "parts": "parts_check", "stub": "stub"},
     )
 
-    # Warranty flow
+    # Warranty flow — evidence runs first (skips silently if no photo attached)
+    g.add_edge("warranty_evidence", "warranty_validate")
     g.add_edge("warranty_validate", "warranty_fraud")
     g.add_edge("warranty_fraud", "warranty_recommend")
     g.add_edge("warranty_recommend", "warranty_cost")

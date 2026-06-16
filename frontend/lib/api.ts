@@ -5,15 +5,32 @@ export const API_BASE =
 
 const BASE = API_BASE;
 
+function getToken(): string | null {
+  try {
+    const raw = window.localStorage.getItem("techm.session");
+    if (!raw) return null;
+    return (JSON.parse(raw) as Session).token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== "undefined" ? getToken() : null;
+  const { headers: extraHeaders, ...restInit } = init ?? {};
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(extraHeaders as Record<string, string> | undefined),
+  };
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     cache: "no-store",
-    ...init,
+    ...restInit,
   });
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      sessionStorage.removeItem("session");
+      localStorage.removeItem("techm.session");
       window.location.href = "/login";
     }
     throw new Error("401: Session expired");
@@ -91,8 +108,10 @@ export async function uploadIntakeImage(
   const fd = new FormData();
   fd.append("session_id", sessionId);
   fd.append("file", file);
+  const token = typeof window !== "undefined" ? getToken() : null;
   const res = await fetch(`${BASE}/api/v1/intake/upload`, {
     method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
   });
   if (!res.ok) {

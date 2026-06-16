@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Shell } from "@/components/Shell";
 import {
   API_BASE,
   claimVIN,
   getTicket,
-  listTickets,
   sendIntake,
   uploadIntakeImage,
   type VINClaimResult,
@@ -384,7 +383,6 @@ export default function CustomerPortal() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [ticketId, setTicketId] = useState<string | null>(null);
-  const [myTickets, setMyTickets] = useState<Ticket[]>([]);
   const [pending, setPending] = useState<File[]>([]);
   const [wantsImage, setWantsImage] = useState(false);
 
@@ -410,22 +408,6 @@ export default function CustomerPortal() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
-
-  const refreshMine = useCallback(async () => {
-    if (!session?.customer_id) return;
-    try {
-      const all = await listTickets();
-      setMyTickets(all.filter((t) => t.customer_id === session.customer_id));
-    } catch {
-      /* ignore */
-    }
-  }, [session?.customer_id]);
-
-  useEffect(() => {
-    refreshMine();
-    const id = setInterval(refreshMine, 5000);
-    return () => clearInterval(id);
-  }, [refreshMine]);
 
   if (!ready || !session) {
     return (
@@ -458,7 +440,7 @@ export default function CustomerPortal() {
     try {
       const result = await claimVIN(vinInput.trim().toUpperCase(), vinRcId ?? undefined);
       setVinResult(result);
-      if (result.status === "registered") refreshMine();
+      // My Requests page polls independently
     } catch {
       setVinResult({ status: "transfer_requested", vin: vinInput.trim(), transfer_id: null });
     } finally {
@@ -505,7 +487,6 @@ export default function CustomerPortal() {
       setWantsImage(Boolean(reply.request_image));
       if (reply.enough_info && reply.ticket_id) {
         setTicketId(reply.ticket_id);
-        refreshMine();
       }
     } catch (e) {
       setMessages((m) => [
@@ -521,114 +502,31 @@ export default function CustomerPortal() {
 
   return (
     <Shell title="Customer Portal" session={session}>
-      <div className="flex min-h-0 flex-1 gap-0">
+      <div className="rise">
 
-        {/* ═══════════════════════════════════════════════════════════
-            LEFT SIDEBAR — My Garage + My Requests
-            ═══════════════════════════════════════════════════════════ */}
-        <aside className="w-72 flex-none border-r border-line bg-surface/60 flex flex-col gap-6 p-5 sticky top-0 h-[calc(100vh-3.5rem)] overflow-y-auto">
-
-          {/* ── My Garage ── */}
-          <div>
-            <div className="flex items-center mb-3">
-              <span className="eyebrow">My Garage</span>
-              <span className="ml-auto font-mono text-[10px] text-faint">
-                {session.vehicles.length} vehicle{session.vehicles.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-
-            {session.vehicles.length === 0 ? (
-              <div className="card p-4 text-center space-y-3">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-raised text-faint">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2h-2" />
-                    <circle cx="7.5" cy="17.5" r="2.5" />
-                    <circle cx="17.5" cy="17.5" r="2.5" />
-                  </svg>
-                </div>
-                <p className="text-xs text-faint">No vehicles on file.</p>
-                <button
-                  onClick={() => start("register_vin")}
-                  className="text-xs font-medium text-techm hover:underline"
-                >
-                  Register one →
-                </button>
+        {/* Garage strip — compact vehicle pills at the top */}
+        {session.vehicles.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-6">
+            <span className="eyebrow mr-1">My Garage</span>
+            {session.vehicles.map((v) => (
+              <div key={v.vin} className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5" style={{ boxShadow: "var(--shadow)" }}>
+                <span className="h-2 w-2 rounded-full bg-techm flex-none" />
+                <span className="text-[13px] font-medium text-ink">{v.model} <span className="text-muted font-normal">{v.year}</span></span>
+                <span className="font-mono text-[10px] text-faint">{v.vin}</span>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {session.vehicles.map((v) => (
-                  <div key={v.vin} className="card relative overflow-hidden px-4 py-3">
-                    <span className={`absolute inset-y-0 left-0 w-[3px] ${CATEGORY_ACCENTS["warranty"]}`} />
-                    <p className="text-sm font-semibold text-ink leading-tight">
-                      {v.model}
-                      <span className="ml-1.5 font-normal text-muted">{v.year}</span>
-                    </p>
-                    <p className="font-mono text-[10px] text-faint mt-1.5 tracking-wide">{v.vin}</p>
-                  </div>
-                ))}
-              </div>
+            ))}
+            {session.vehicles.length === 0 && (
+              <button onClick={() => start("register_vin")} className="text-xs font-medium text-techm hover:underline">
+                Register a vehicle →
+              </button>
             )}
           </div>
-
-          {/* Divider */}
-          <div className="h-px bg-line" />
-
-          {/* ── My Requests ── */}
-          <div className="flex-1 min-h-0">
-            <div className="flex items-center mb-3">
-              <span className="eyebrow">My Requests</span>
-              {myTickets.length > 0 && (
-                <span className="badge badge-warranty ml-auto">{myTickets.length}</span>
-              )}
-            </div>
-
-            {myTickets.length === 0 ? (
-              <p className="text-xs text-faint px-1 leading-relaxed">
-                Your requests will appear here once you start one.
-              </p>
-            ) : (
-              <ul className="space-y-0.5">
-                {myTickets.slice(0, 10).map((t) => (
-                  <li key={t.id}>
-                    <button
-                      onClick={() => {
-                        setTicketId(t.id);
-                        setCategory(t.domain ?? "warranty");
-                      }}
-                      className={`w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-raised ${
-                        ticketId === t.id ? "bg-raised border border-line" : ""
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className={`mt-1.5 flex-none ${dotClass(t.status)}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-ink line-clamp-2 leading-snug">
-                            {t.summary}
-                          </p>
-                          <div className="flex items-center justify-between mt-1 gap-1">
-                            <span className="font-mono text-[10px] text-faint">
-                              #{t.id.slice(0, 8).toUpperCase()}
-                            </span>
-                            {Boolean((t as Record<string, unknown>).created_at) && (
-                              <span className="text-[10px] text-faint">
-                                {relTime((t as Record<string, unknown>).created_at as string)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </aside>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════
             MAIN AREA — state-based rendering
             ═══════════════════════════════════════════════════════════ */}
-        <main className="flex-1 min-w-0 overflow-y-auto p-6 lg:p-8">
+        <main className="min-w-0">
 
           {/* ── STATE 1: No category selected — category grid ── */}
           {!category && (

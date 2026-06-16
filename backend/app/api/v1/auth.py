@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import Principal, get_current_principal
 from app.db.session import get_db
 from app.models import Customer, Staff, Vehicle
-from app.schemas import LoginRequest, LoginResponse, MeResponse, VehicleOut
-from app.services.security import create_access_token, verify_password
+from app.schemas import LoginRequest, LoginResponse, MeResponse, RegisterRequest, VehicleOut
+from app.services.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -58,6 +58,28 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
         customer_id=customer.id,
         vehicles=[VehicleOut.model_validate(v) for v in vehicles],
     )
+
+
+@router.post("/register", response_model=LoginResponse, status_code=201)
+def register(req: RegisterRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    email = req.email.strip().lower()
+    if db.scalar(select(Customer).where(func.lower(Customer.email) == email)):
+        raise HTTPException(status_code=409, detail="An account with that email already exists.")
+    customer = Customer(
+        name=req.name.strip(),
+        email=email,
+        phone=req.phone.strip(),
+        password_hash=hash_password(req.password),
+    )
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
+    token = create_access_token(
+        {"sub": customer.id, "role": "customer", "email": customer.email,
+         "name": customer.name, "customer_id": customer.id}
+    )
+    return LoginResponse(token=token, role="customer", name=customer.name,
+                         email=customer.email, customer_id=customer.id, vehicles=[])
 
 
 @router.get("/me", response_model=MeResponse)
