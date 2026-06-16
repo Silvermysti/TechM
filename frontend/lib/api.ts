@@ -32,6 +32,44 @@ export function login(email: string, password: string): Promise<Session> {
   });
 }
 
+export function register(name: string, email: string, password: string, phone?: string): Promise<Session> {
+  return jsonFetch<Session>("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ name, email, password, phone: phone ?? "" }),
+  });
+}
+
+export type VINClaimResult = {
+  status: "registered" | "already_owned" | "transfer_requested";
+  vin: string;
+  transfer_id: string | null;
+};
+
+export function claimVIN(vin: string, rc_attachment_id?: string): Promise<VINClaimResult> {
+  return jsonFetch<VINClaimResult>("/api/v1/vehicles/claim", {
+    method: "POST",
+    body: JSON.stringify({ vin, rc_attachment_id: rc_attachment_id ?? null }),
+  });
+}
+
+export type VINTransfer = {
+  id: string; vin: string; requester_name: string; requester_email: string;
+  current_owner_id: string | null; rc_attachment_id: string | null;
+  status: string; requested_at: string;
+};
+
+export function listTransfers(): Promise<VINTransfer[]> {
+  return jsonFetch<VINTransfer[]>("/api/v1/vehicles/transfers");
+}
+
+export function approveTransfer(id: string): Promise<VINTransfer> {
+  return jsonFetch<VINTransfer>(`/api/v1/vehicles/transfers/${id}/approve`, { method: "POST" });
+}
+
+export function rejectTransfer(id: string): Promise<VINTransfer> {
+  return jsonFetch<VINTransfer>(`/api/v1/vehicles/transfers/${id}/reject`, { method: "POST" });
+}
+
 export function sendIntake(body: {
   session_id: string;
   message: string;

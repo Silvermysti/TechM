@@ -77,22 +77,27 @@ export function Shell({
   return (
     <div className="flex min-h-screen">
       {/* ---- Sidebar ---- */}
-      <aside className="sticky top-0 hidden h-screen w-60 flex-none flex-col border-r border-line bg-surface/70 backdrop-blur-sm lg:flex">
-        <div className="border-b border-line px-5 py-[18px]">
-          <div className="mark text-[0.68rem] text-ink">
+      <aside
+        className="sticky top-0 hidden h-screen flex-none flex-col border-r border-line bg-surface/80 backdrop-blur-md lg:flex"
+        style={{ width: "256px" }}
+      >
+        {/* Sidebar header */}
+        <div className="border-b border-line px-5 py-4">
+          <div className="mark text-[0.7rem] text-ink">
             <span className="mark-glyph" />
             Tech&nbsp;Mahindra
           </div>
-          <p className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.2em] text-faint">
-            After-Sales AI Command Center
+          <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.22em] text-faint">
+            After-Sales AI
           </p>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+        {/* Nav */}
+        <nav className="no-scrollbar flex-1 overflow-y-auto px-3 py-4">
           {nav.map((group) => (
-            <div key={group.section} className="mb-5">
-              <p className="eyebrow px-2 pb-2">{group.section}</p>
-              <ul className="space-y-0.5">
+            <div key={group.section} className="mb-6">
+              <p className="eyebrow mb-2 px-2">{group.section}</p>
+              <ul className="space-y-px">
                 {group.items.map((item) => {
                   const active = pathname === item.href;
                   return (
@@ -100,25 +105,36 @@ export function Shell({
                       <Link
                         href={item.href}
                         aria-disabled={item.soon}
-                        className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition ${
+                        className={[
+                          "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition-all duration-150",
                           active
                             ? "bg-techm-soft font-semibold text-ink"
                             : item.soon
-                              ? "text-faint hover:text-muted"
-                              : "text-muted hover:bg-raised hover:text-ink"
-                        }`}
+                              ? "cursor-default text-faint"
+                              : "text-muted hover:bg-raised hover:text-ink",
+                        ].join(" ")}
                       >
+                        {/* Left accent strip on active */}
                         {active && (
-                          <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-techm" />
+                          <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-techm" />
                         )}
+
+                        {/* Code badge */}
                         <span
-                          className={`font-mono text-[10px] ${active ? "text-techm" : "text-faint"}`}
+                          className={[
+                            "flex h-5 w-5 flex-none items-center justify-center rounded font-mono text-[9px] font-medium",
+                            active
+                              ? "bg-techm text-white"
+                              : "bg-raised text-faint group-hover:bg-line-strong group-hover:text-muted",
+                          ].join(" ")}
                         >
                           {item.code}
                         </span>
-                        {item.label}
+
+                        <span className="flex-1 truncate">{item.label}</span>
+
                         {item.soon && (
-                          <span className="ml-auto font-mono text-[8px] uppercase tracking-wider text-faint">
+                          <span className="ml-auto rounded border border-line px-1 font-mono text-[8px] uppercase tracking-wider text-faint">
                             soon
                           </span>
                         )}
@@ -131,23 +147,34 @@ export function Shell({
           ))}
         </nav>
 
-        <div className="border-t border-line p-3">
-          <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-            <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-techm font-display text-xs font-bold text-white">
+        {/* User section */}
+        <div className="border-t border-line p-3 space-y-2">
+          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+            {/* Initials avatar */}
+            <span
+              className="flex h-9 w-9 flex-none items-center justify-center rounded-lg font-display text-xs font-bold text-white"
+              style={{
+                background:
+                  "linear-gradient(135deg, var(--techm) 0%, var(--techm-deep) 100%)",
+                boxShadow: "0 2px 8px -2px var(--techm)",
+              }}
+            >
               {initials}
             </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium leading-tight text-ink">
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold leading-tight text-ink">
                 {session.name}
               </p>
-              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+              <span className="chip mt-0.5 border-techm-soft text-[8px] text-techm">
                 {session.role}
-              </p>
+              </span>
             </div>
           </div>
+
           <button
             onClick={logout}
-            className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted transition hover:border-techm hover:text-techm"
+            className="w-full rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted transition-all duration-150 hover:border-techm/50 hover:bg-techm-soft hover:text-techm"
           >
             Sign out
           </button>
@@ -156,9 +183,13 @@ export function Shell({
 
       {/* ---- Main column ---- */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b border-line bg-bg/85 backdrop-blur-md">
-          <div className="h-0.5 w-full bg-gradient-to-r from-techm via-techm/30 to-transparent" />
-          <div className="flex items-center justify-between gap-4 px-6 py-3">
+        {/* Header */}
+        <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur-md">
+          {/* Brand accent line */}
+          <div className="h-[2px] w-full bg-gradient-to-r from-techm via-techm/40 to-transparent" />
+
+          <div className="flex items-center justify-between gap-4 px-6 py-2.5">
+            {/* Left: mobile mark + page title */}
             <div className="flex items-center gap-3">
               <div className="mark text-[0.66rem] text-ink lg:hidden">
                 <span className="mark-glyph" />
@@ -168,20 +199,28 @@ export function Shell({
                 {title}
               </h1>
             </div>
+
+            {/* Right: status cluster */}
             <div className="flex items-center gap-4">
-              <span className="hidden items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-faint sm:flex">
-                <span className="h-1.5 w-1.5 rounded-full bg-ok" />
-                Operational
+              {/* Operational status with live dot */}
+              <span className="hidden items-center gap-1.5 sm:flex">
+                <span className="dot dot-live" />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-faint">
+                  Operational
+                </span>
               </span>
+
               <Clock />
               <ThemeToggle />
             </div>
           </div>
         </header>
 
+        {/* Page content */}
         <main className="flex-1 px-6 py-6">{children}</main>
 
-        <footer className="border-t border-line px-6 py-2.5">
+        {/* Footer */}
+        <footer className="border-t border-line px-6 py-2">
           <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-faint">
             <span>TechM After-Sales · Plan B demo</span>
             <span className="hidden sm:block">APQC PCF 6.7 / 8.2</span>
