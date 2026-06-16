@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { getTicket, listTickets, sendIntake, uploadIntakeImage } from "@/lib/api";
+import { API_BASE, claimVIN, getTicket, listTickets, sendIntake, uploadIntakeImage, type VINClaimResult } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Ticket } from "@/lib/types";
 
@@ -21,7 +21,16 @@ const CATEGORIES = [
   { key: "service", code: "S-02", label: "Service Booking", hint: "Schedule maintenance" },
   { key: "parts", code: "P-03", label: "Parts Query", hint: "Availability & orders" },
   { key: "recall", code: "R-04", label: "Recall Check", hint: "Safety notices" },
+  { key: "register_vin", code: "V-05", label: "Register Vehicle", hint: "Add a new or second-hand car" },
 ];
+
+const UPLOAD_HINTS: Record<string, string | null> = {
+  warranty: "Photo of the broken/damaged part (optional — speeds up approval)",
+  service: "Repair bill or diagnostic report (optional)",
+  parts: "Invoice or part number label (optional)",
+  recall: null,
+  register_vin: "RC (Registration Certificate) — required if VIN is registered to someone else",
+};
 
 const STATUS_STEPS = [
   { keys: ["submitted", "under_review", "processing"], label: "Submitted" },
@@ -153,6 +162,12 @@ export default function CustomerPortal() {
   const [myTickets, setMyTickets] = useState<Ticket[]>([]);
   const [pending, setPending] = useState<File[]>([]);
   const [wantsImage, setWantsImage] = useState(false);
+
+  // VIN registration state
+  const [vinInput, setVinInput] = useState("");
+  const [vinResult, setVinResult] = useState<VINClaimResult | null>(null);
+  const [vinBusy, setVinBusy] = useState(false);
+  const [vinRcId, setVinRcId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const sessionId = useRef<string>(
     typeof crypto !== "undefined" ? crypto.randomUUID() : String(Math.random()),
@@ -194,13 +209,35 @@ export default function CustomerPortal() {
     setTicketId(null);
     setPending([]);
     setWantsImage(false);
-    setMessages([{ role: "assistant", content: GREETING }]);
+    setVinResult(null);
+    setVinInput("");
+    setVinRcId(null);
+    if (cat !== "register_vin") {
+      setMessages([{ role: "assistant", content: GREETING }]);
+    }
+  };
+
+  const submitVinClaim = async () => {
+    if (!vinInput.trim() || vinBusy) return;
+    setVinBusy(true);
+    setVinResult(null);
+    try {
+      const result = await claimVIN(vinInput.trim().toUpperCase(), vinRcId ?? undefined);
+      setVinResult(result);
+      if (result.status === "registered") refreshMine();
+    } catch {
+      setVinResult({ status: "transfer_requested", vin: vinInput.trim(), transfer_id: null });
+    } finally {
+      setVinBusy(false);
+    }
   };
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    const images = Array.from(list).filter((f) => f.type.startsWith("image/"));
-    setPending((p) => [...p, ...images].slice(0, 4));
+    const accepted = Array.from(list).filter(
+      (f) => f.type.startsWith("image/") || f.type === "application/pdf",
+    );
+    setPending((p) => [...p, ...accepted].slice(0, 4));
   };
 
   const send = async () => {
@@ -293,6 +330,99 @@ export default function CustomerPortal() {
                   ← Change category
                 </button>
               </div>
+
+              {/* VIN registration flow */}
+              {category === "register_vin" && (
+                <div className="card space-y-4 p-5">
+                  <div>
+                    <label className="eyebrow">Vehicle Identification Number (VIN)</label>
+                    <input
+                      value={vinInput}
+                      onChange={(e) => setVinInput(e.target.value)}
+                      placeholder="e.g. MA3DEMO00000SWIFT"
+                      className="field mt-2 w-full px-4 py-2.5 font-mono text-sm tracking-wider"
+                    />
+                    <p className="mt-1.5 text-xs text-faint">
+                      Found on your RC document, dashboard (driver side), or door jamb.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="eyebrow">
+                      RC Document{" "}
+                      <span className="font-normal normal-case text-faint">
+                        (required if transferring from another owner)
+                      </span>
+                    </label>
+                    <div className={`mt-2 rounded-xl border-2 border-dashed px-4 py-4 text-center transition ${
+                      vinRcId ? "border-ok/50 bg-ok-soft/30" : "border-line hover:border-techm/50"
+                    }`}>
+                      {vinRcId ? (
+                        <div className="flex items-center justify-center gap-2 text-sm text-ok">
+                          <span>✓</span>
+                          <span>RC document uploaded</span>
+                          <button
+                            onClick={() => setVinRcId(null)}
+                            className="ml-2 text-xs text-faint hover:text-danger"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm text-muted">
+                            Upload a photo or scan of your RC — helps the manager verify ownership
+                          </p>
+                          <label className="mt-2 inline-block cursor-pointer rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted transition hover:border-techm hover:text-techm">
+                            Choose file
+                            <input
+                              type="file"
+                              accept="image/*,application/pdf"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const f = e.target.files?.[0];
+                                if (!f || !session) return;
+                                try {
+                                  const att = await uploadIntakeImage(sessionId.current, f);
+                                  setVinRcId(att.id);
+                                } catch { /* ignore */ }
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {vinResult && (
+                    <div className={`rounded-xl border px-4 py-3 text-sm ${
+                      vinResult.status === "registered"
+                        ? "border-ok/40 bg-ok-soft text-ok"
+                        : vinResult.status === "already_owned"
+                        ? "border-warn/40 bg-warn-soft text-warn"
+                        : "border-techm/40 bg-techm-soft text-techm"
+                    }`}>
+                      {vinResult.status === "registered" && "✓ Vehicle registered to your account."}
+                      {vinResult.status === "already_owned" && "This vehicle is already on your account."}
+                      {vinResult.status === "transfer_requested" && (
+                        <>Transfer request submitted. A manager will review your RC and approve shortly.</>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={submitVinClaim}
+                    disabled={vinBusy || !vinInput.trim()}
+                    className="w-full rounded-xl bg-techm px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-techm-deep disabled:opacity-50"
+                  >
+                    {vinBusy ? "Submitting…" : "Register vehicle"}
+                  </button>
+                </div>
+              )}
+
+              {category !== "register_vin" && (
+              <>
               <div className="flex items-center gap-3 text-sm">
                 <label className="eyebrow">Vehicle</label>
                 {session.vehicles.length > 0 ? (
@@ -376,11 +506,18 @@ export default function CustomerPortal() {
                 </div>
               )}
 
+              {UPLOAD_HINTS[category] && (
+                <div className="flex items-start gap-2 rounded-xl border border-line bg-raised px-3.5 py-2.5 text-xs text-muted">
+                  <span className="mt-0.5 text-techm">📎</span>
+                  <span>{UPLOAD_HINTS[category]}</span>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <input
                   ref={fileInput}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf"
                   multiple
                   className="hidden"
                   onChange={(e) => {
@@ -422,6 +559,8 @@ export default function CustomerPortal() {
                   Send
                 </button>
               </div>
+              </>
+              )}
             </div>
           )}
 

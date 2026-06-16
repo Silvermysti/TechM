@@ -4,14 +4,18 @@ import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import {
   API_BASE,
+  approveTransfer,
   closeClaim,
   decideTicket,
   getClaim,
   getMetrics,
   listAudit,
   listTickets,
+  listTransfers,
   payClaim,
+  rejectTransfer,
   type TrendMetrics,
+  type VINTransfer,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTicketStream, type SSEEvent } from "@/lib/useSSE";
@@ -648,7 +652,19 @@ export default function ManagerPortal() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"queue" | "audit" | "monitor" | "trends">("queue");
+  const [tab, setTab] = useState<"queue" | "audit" | "monitor" | "trends" | "transfers">("queue");
+  const [transfers, setTransfers] = useState<VINTransfer[]>([]);
+  const [transferBusy, setTransferBusy] = useState<string | null>(null);
+
+  const refreshTransfers = useCallback(async () => {
+    try { setTransfers(await listTransfers()); } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    refreshTransfers();
+    const id = setInterval(refreshTransfers, 5000);
+    return () => clearInterval(id);
+  }, [refreshTransfers]);
 
   const refresh = useCallback(async () => {
     try {
@@ -711,11 +727,11 @@ export default function ManagerPortal() {
         </div>
 
         <div className="mt-5 flex gap-1 border-b border-line">
-          {(["queue", "monitor", "trends", "audit"] as const).map((t) => (
+          {(["queue", "monitor", "trends", "transfers", "audit"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium transition ${
+              className={`relative px-4 py-2.5 text-sm font-medium transition ${
                 tab === t
                   ? "border-b-2 border-techm text-techm"
                   : "text-muted hover:text-ink"
@@ -724,6 +740,16 @@ export default function ManagerPortal() {
               {t === "queue" ? "Approval Queue"
                 : t === "monitor" ? "Agent Monitor"
                 : t === "trends" ? "Performance Trends"
+                : t === "transfers" ? (
+                  <>
+                    Vehicle Transfers
+                    {transfers.filter((x) => x.status === "pending").length > 0 && (
+                      <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-techm px-1 text-[10px] font-bold text-white">
+                        {transfers.filter((x) => x.status === "pending").length}
+                      </span>
+                    )}
+                  </>
+                )
                 : "Audit Log"}
             </button>
           ))}
@@ -740,6 +766,98 @@ export default function ManagerPortal() {
         ) : tab === "trends" ? (
           <div className="mt-5">
             <TrendsPanel />
+          </div>
+        ) : tab === "transfers" ? (
+          <div className="mt-5 space-y-3">
+            <p className="eyebrow">Pending vehicle ownership transfers</p>
+            {transfers.filter((x) => x.status === "pending").length === 0 ? (
+              <p className="card p-5 text-sm text-faint">No pending transfers.</p>
+            ) : (
+              transfers
+                .filter((x) => x.status === "pending")
+                .map((tr) => (
+                  <div key={tr.id} className="card p-5 space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-mono text-sm font-semibold text-ink">{tr.vin}</p>
+                        <p className="mt-0.5 text-xs text-muted">
+                          Requested by{" "}
+                          <span className="font-medium text-ink">{tr.requester_name}</span>{" "}
+                          &lt;{tr.requester_email}&gt;
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-faint">
+                          Submitted {new Date(tr.requested_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-none">
+                        <button
+                          disabled={transferBusy === tr.id}
+                          onClick={async () => {
+                            setTransferBusy(tr.id);
+                            try { await approveTransfer(tr.id); await refreshTransfers(); }
+                            finally { setTransferBusy(null); }
+                          }}
+                          className="rounded-lg border border-ok/40 bg-ok-soft px-3 py-1.5 text-xs font-semibold text-ok transition hover:bg-ok/10 disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          disabled={transferBusy === tr.id}
+                          onClick={async () => {
+                            setTransferBusy(tr.id);
+                            try { await rejectTransfer(tr.id); await refreshTransfers(); }
+                            finally { setTransferBusy(null); }
+                          }}
+                          className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-1.5 text-xs font-semibold text-danger transition hover:bg-danger/10 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                    {tr.rc_attachment_id && (
+                      <p className="text-xs text-muted">
+                        RC document attached —{" "}
+                        <a
+                          href={`${API_BASE}/api/v1/intake/attachments/${tr.rc_attachment_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-techm underline underline-offset-2"
+                        >
+                          View RC
+                        </a>
+                      </p>
+                    )}
+                  </div>
+                ))
+            )}
+            {transfers.filter((x) => x.status !== "pending").length > 0 && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-xs text-faint hover:text-muted">
+                  Resolved transfers ({transfers.filter((x) => x.status !== "pending").length})
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {transfers
+                    .filter((x) => x.status !== "pending")
+                    .map((tr) => (
+                      <div key={tr.id} className="card px-4 py-3 opacity-60">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-mono text-xs text-ink">{tr.vin}</p>
+                          <span className={`chip text-[10px] ${
+                            tr.status === "approved"
+                              ? "border-ok/40 text-ok"
+                              : "border-danger/40 text-danger"
+                          }`}>
+                            {tr.status}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-faint">
+                          {tr.requester_name} · {new Date(tr.requested_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              </details>
+            )}
           </div>
         ) : (
           <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[360px_1fr]">
