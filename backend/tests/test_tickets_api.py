@@ -171,6 +171,9 @@ def test_endpoints_require_auth(client):
     assert client.get("/api/v1/tickets").status_code == 401
     assert client.post("/api/v1/intake",
                        json={"session_id": "x", "message": "hi"}).status_code == 401
+    # Uploaded files (photos + RC documents) must not be public.
+    assert client.get("/api/v1/attachments/anything").status_code == 401
+    assert client.get("/uploads/anything.jpg").status_code == 404  # static mount removed
 
 
 def test_customer_cannot_decide(client, customer_headers, monkeypatch):

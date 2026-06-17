@@ -220,7 +220,8 @@ class Attachment(Base):
 
     @property
     def url(self) -> str:
-        return f"/uploads/{self.stored_name}"
+        # Served behind auth (GET /api/v1/attachments/{id}); not a public static path.
+        return f"/api/v1/attachments/{self.id}"
 
 
 class AgentExecution(Base):

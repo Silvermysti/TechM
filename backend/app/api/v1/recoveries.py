@@ -69,6 +69,12 @@ def generate_recovery(
         raise HTTPException(
             status_code=409, detail="claim is not recoverable from a supplier"
         )
+    # Recovery only makes sense once the company has committed to paying the claim.
+    if claim.status not in ("approved", "paid", "closed"):
+        raise HTTPException(
+            status_code=409,
+            detail="claim must be approved before a supplier recovery can be raised",
+        )
 
     existing = db.scalar(
         select(SupplierRecovery).where(SupplierRecovery.claim_id == claim_id)

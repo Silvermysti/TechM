@@ -137,3 +137,21 @@ def test_customer_cannot_generate_recovery():
     claim = _make_claim("brakes")
     r = client.post(f"/api/v1/claims/{claim.id}/recovery", headers=_customer_headers())
     assert r.status_code == 403
+
+
+def test_recovery_rejected_for_unapproved_claim():
+    """A claim that isn't approved/paid/closed cannot have a recovery raised."""
+    db = SessionLocal()
+    try:
+        ticket = Ticket(vehicle_vin="VINREC2", component="brakes", domain="warranty",
+                        summary="brakes", status="awaiting_approval")
+        db.add(ticket)
+        db.commit()
+        claim = build_warranty_claim(db, ticket, decided_by="Mgr", status="submitted")
+        db.commit()
+        claim_id = claim.id
+    finally:
+        db.close()
+    with patch("app.api.v1.recoveries.draft_recovery", return_value=_FAKE_DRAFT):
+        r = client.post(f"/api/v1/claims/{claim_id}/recovery", headers=_manager_headers())
+    assert r.status_code == 409

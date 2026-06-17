@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -25,7 +26,7 @@ from app.api.deps import Principal, get_current_principal
 from app.config import get_settings
 from app.core.langgraph.intake import format_follow_up, next_intake_step
 from app.db.session import get_db
-from app.models import Attachment, IntakeSession, Vehicle
+from app.models import Attachment, IntakeSession, Ticket, Vehicle
 from app.schemas import AttachmentOut, IntakeMessage, IntakeReply
 from app.services.graph_runner import create_ticket_record, run_ticket_graph
 
@@ -87,6 +88,36 @@ async def upload_evidence(
     db.commit()
     db.refresh(att)
     return att
+
+
+@router.get("/attachments/{attachment_id}")
+def get_attachment(
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> FileResponse:
+    """Serve an uploaded file behind auth (photos + RC documents are private).
+
+    Managers may view any attachment; a customer may view only attachments linked to
+    their own ticket. Token may be passed as `?token=` since <img>/<a> can't set headers.
+    """
+    att = db.get(Attachment, attachment_id)
+    if att is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+
+    if principal.role != "manager":
+        ticket = db.get(Ticket, att.ticket_id) if att.ticket_id else None
+        if ticket is None or ticket.customer_id != principal.customer_id:
+            raise HTTPException(status_code=404, detail="attachment not found")
+
+    path = UPLOAD_DIR / att.stored_name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="file no longer available")
+    return FileResponse(
+        path,
+        media_type=att.content_type or "application/octet-stream",
+        filename=att.filename or att.stored_name,
+    )
 
 
 @router.post("/intake", response_model=IntakeReply)

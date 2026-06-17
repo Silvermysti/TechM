@@ -103,10 +103,13 @@ Shared: `lib/api.ts` (REST + 401 auto-redirect), `lib/auth.ts`, `lib/useSSE.ts`,
 - `run_ticket_graph()` opens its own `SessionLocal()` — never pass a request-scoped session to it.
 - SSE token auth: `deps.py` `get_current_principal` accepts `?token=` query param as fallback
   because `EventSource` cannot set the `Authorization` header.
+- Uploaded files (photos + RC documents) are **private**: served only via authed
+  `GET /api/v1/attachments/{id}` (manager = any; customer = own ticket only), NOT a public static
+  mount. Frontend builds image URLs with `attachmentUrl(id)` (appends `?token=` for `<img>`/`<a>`).
 
 ## Current state
 Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWARD-PLAN.md`).
-70 tests passing, TypeScript clean.
+71 tests passing, TypeScript clean.
 - **Phase 5:** password + JWT auth with roles
 - **Phase 6:** durable LangGraph checkpointer, DB-backed intake sessions, unique claim numbers
 - **Phase 7:** notifications (`services/notify.py`), claim lifecycle (pay/close), audit API

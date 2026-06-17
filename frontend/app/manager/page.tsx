@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Shell } from "@/components/Shell";
 import {
-  API_BASE,
   approveTransfer,
+  attachmentUrl,
   closeClaim,
   decideTicket,
   generateRecovery,
@@ -195,7 +195,7 @@ function AgentTraceTimeline({
               {isEvidence && attachments && attachments.length > 0 && (
                 <div className="mt-2.5 flex items-start gap-3">
                   <a
-                    href={`${API_BASE}${attachments[0].url}`}
+                    href={attachmentUrl(attachments[0].id)}
                     target="_blank"
                     rel="noreferrer"
                     className="group flex-none overflow-hidden rounded-lg border border-line transition hover:border-techm"
@@ -203,7 +203,7 @@ function AgentTraceTimeline({
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`${API_BASE}${attachments[0].url}`}
+                      src={attachmentUrl(attachments[0].id)}
                       alt={attachments[0].filename}
                       className="h-20 w-20 object-cover transition group-hover:scale-105"
                     />
@@ -472,7 +472,7 @@ function TicketDetailPanel({
               {ticket.attachments.map((a) => (
                 <a
                   key={a.id}
-                  href={`${API_BASE}${a.url}`}
+                  href={attachmentUrl(a.id)}
                   target="_blank"
                   rel="noreferrer"
                   title={a.filename}
@@ -480,7 +480,7 @@ function TicketDetailPanel({
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`${API_BASE}${a.url}`}
+                    src={attachmentUrl(a.id)}
                     alt={a.filename}
                     className="h-24 w-24 object-cover transition group-hover:scale-105"
                   />
@@ -1029,7 +1029,7 @@ function TransfersTab({
                   </p>
                   {tr.rc_attachment_id && (
                     <a
-                      href={`${API_BASE}/api/v1/intake/attachments/${tr.rc_attachment_id}`}
+                      href={attachmentUrl(tr.rc_attachment_id)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 font-mono text-[10px] text-techm underline underline-offset-2 hover:text-techm-deep"

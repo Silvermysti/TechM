@@ -15,6 +15,14 @@ function getToken(): string | null {
   }
 }
 
+/** Full URL for an uploaded attachment, with the auth token in the query string
+ *  (an <img>/<a> can't send an Authorization header, so the endpoint accepts ?token=). */
+export function attachmentUrl(attachmentId: string): string {
+  const token = typeof window !== "undefined" ? getToken() : null;
+  const q = token ? `?token=${encodeURIComponent(token)}` : "";
+  return `${API_BASE}/api/v1/attachments/${attachmentId}${q}`;
+}
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? getToken() : null;
   const { headers: extraHeaders, ...restInit } = init ?? {};
