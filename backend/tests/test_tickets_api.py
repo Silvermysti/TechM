@@ -101,6 +101,53 @@ def test_ticket_lifecycle(client, customer_headers, manager_headers, monkeypatch
     assert r.json()["human_decision"] == "approve"
 
 
+def test_escalated_ticket_can_still_be_resolved(client, customer_headers,
+                                                 manager_headers, monkeypatch):
+    """Escalate must not be a dead-end: it re-queues, and a later approve resolves it."""
+    from app.core.langgraph import intake
+    from app.services import llm
+
+    monkeypatch.setattr(intake, "default_decider", _fake_intake)
+    monkeypatch.setattr(llm, "decide", _fake_decide)
+
+    r = client.post("/api/v1/intake", json={
+        "session_id": "esc1", "message": "AC failed", "vin": "MA3DEMO00000SWIFT",
+    }, headers=customer_headers)
+    ticket_id = r.json()["ticket_id"]
+
+    # manager escalates -> ticket moves to 'escalated', NOT terminal
+    r = client.post(f"/api/v1/tickets/{ticket_id}/decision",
+                    json={"decision": "escalate"}, headers=manager_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "escalated"
+
+    # a (senior) manager can still act on the escalated ticket -> resolved
+    r = client.post(f"/api/v1/tickets/{ticket_id}/decision",
+                    json={"decision": "approve"}, headers=manager_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "resolved"
+    assert r.json()["human_decision"] == "approve"
+
+
+def test_customer_list_is_redacted(client, customer_headers, manager_headers, monkeypatch):
+    """GET /tickets must not leak fraud scores / agent reasoning to customers."""
+    from app.core.langgraph import intake
+    from app.services import llm
+
+    monkeypatch.setattr(intake, "default_decider", _fake_intake)
+    monkeypatch.setattr(llm, "decide", _fake_decide)
+
+    client.post("/api/v1/intake", json={
+        "session_id": "red1", "message": "AC failed", "vin": "MA3DEMO00000SWIFT",
+    }, headers=customer_headers)
+
+    rows = client.get("/api/v1/tickets", headers=customer_headers).json()
+    assert rows, "customer should see their own tickets"
+    for t in rows:
+        assert "agent_trace" not in t
+        assert "recommendation" not in t
+
+
 def test_intake_asks_follow_up(client, customer_headers, monkeypatch):
     from app.core.langgraph import intake
 

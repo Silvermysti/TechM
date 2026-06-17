@@ -275,17 +275,42 @@ def trigger_recall(db: Session, *, recall_id: str, actor: str) -> Ticket:
 
 
 def decide_ticket(db: Session, *, ticket_id: str, decision: str, actor: str) -> Ticket | None:
-    """Resume a paused ticket with the human's decision and finalize it."""
+    """Apply a human decision to a paused ticket.
+
+    Escalate does NOT resume the graph — it re-labels the ticket and leaves the
+    `interrupt()` pending so a senior reviewer can still approve/reject it later. Only
+    approve/reject resume the still-paused thread and finalize.
+    """
     ticket = db.get(Ticket, ticket_id)
-    if ticket is None or not ticket.thread_id or ticket.status != "awaiting_approval":
+    if (
+        ticket is None
+        or not ticket.thread_id
+        or ticket.status not in ("awaiting_approval", "escalated")
+    ):
         return None
+
+    if decision == "escalate":
+        # Don't resume the graph: move to the Escalated queue, keep the interrupt
+        # pending. A later approve/reject resumes the same paused thread.
+        ticket.status = "escalated"
+        ticket.human_decision = "escalate"
+        ticket.human_actor = actor
+        if ticket.recommendation:
+            rec = dict(ticket.recommendation)
+            rec["final_decision"] = "escalate"
+            ticket.recommendation = rec
+        _emit(ticket.id, "ticket.escalated", {"status": "escalated"})
+        _audit(db, actor_type="human", actor_id=actor, action="decision:escalate",
+               resource_id=ticket.id, after={"status": "escalated"})
+        db.commit()
+        db.refresh(ticket)
+        return ticket
 
     values = resume_run(thread_id=ticket.thread_id, decision=decision)
     ticket.human_decision = decision
     ticket.human_actor = actor
     ticket.status = values.get("final_status", ticket.status)
-    if decision != "escalate":
-        ticket.resolved_at = _now()
+    ticket.resolved_at = _now()
     if ticket.recommendation:
         rec = dict(ticket.recommendation)
         rec["final_decision"] = decision

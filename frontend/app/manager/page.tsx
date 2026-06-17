@@ -347,6 +347,8 @@ function TicketDetailPanel({
   const confFill =
     confPct >= 70 ? "bg-ok" : confPct >= 40 ? "bg-warn" : "bg-danger";
   const isAwaiting = ticket.status === "awaiting_approval";
+  const isEscalated = ticket.status === "escalated";
+  const isActionable = isAwaiting || isEscalated;  // escalated is re-queued, not terminal
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -509,29 +511,40 @@ function TicketDetailPanel({
 
       {/* ── Action Bar (sticky bottom) ── */}
       <div className="flex-none border-t border-line bg-surface/95 backdrop-blur-sm px-6 py-4">
-        {isAwaiting ? (
-          <div className="flex gap-3">
-            <button
-              onClick={() => onDecide("approve")}
-              disabled={busy}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ok px-4 py-3 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40 active:scale-[0.98]"
-            >
-              <span className="text-base">✓</span> Approve
-            </button>
-            <button
-              onClick={() => onDecide("reject")}
-              disabled={busy}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-danger/50 bg-danger-soft/40 px-4 py-3 text-sm font-bold text-danger transition hover:bg-danger-soft disabled:opacity-40 active:scale-[0.98]"
-            >
-              <span className="text-base">✕</span> Reject
-            </button>
-            <button
-              onClick={() => onDecide("escalate")}
-              disabled={busy}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-warn/50 bg-warn-soft/40 px-4 py-3 text-sm font-bold text-warn transition hover:bg-warn-soft disabled:opacity-40 active:scale-[0.98]"
-            >
-              <span className="text-base">↑</span> Escalate
-            </button>
+        {isActionable ? (
+          <div className="space-y-2">
+            {isEscalated && (
+              <p className="text-[11px] font-medium text-warn">
+                ↑ Escalated for senior review — approve or reject to resolve.
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => onDecide("approve")}
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ok px-4 py-3 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40 active:scale-[0.98]"
+              >
+                <span className="text-base">✓</span> Approve
+              </button>
+              <button
+                onClick={() => onDecide("reject")}
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-danger/50 bg-danger-soft/40 px-4 py-3 text-sm font-bold text-danger transition hover:bg-danger-soft disabled:opacity-40 active:scale-[0.98]"
+              >
+                <span className="text-base">✕</span> Reject
+              </button>
+              {/* Escalate only from the first review — an already-escalated ticket
+                  goes to a senior who must approve/reject, not re-escalate. */}
+              {!isEscalated && (
+                <button
+                  onClick={() => onDecide("escalate")}
+                  disabled={busy}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-warn/50 bg-warn-soft/40 px-4 py-3 text-sm font-bold text-warn transition hover:bg-warn-soft disabled:opacity-40 active:scale-[0.98]"
+                >
+                  <span className="text-base">↑</span> Escalate
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-3">
@@ -1301,9 +1314,12 @@ export default function ManagerPortal() {
 
   // ── Derived state ──
 
-  const queue = tickets.filter((t) => t.status === "awaiting_approval");
+  // Escalated tickets are pending work (re-queued for a senior), not done.
+  const queue = tickets.filter(
+    (t) => t.status === "awaiting_approval" || t.status === "escalated",
+  );
   const done = tickets.filter((t) =>
-    ["resolved", "rejected", "escalated"].includes(t.status),
+    ["resolved", "rejected"].includes(t.status),
   );
   const autoApproved = tickets.filter(
     (t) => t.status === "resolved" && t.human_decision === null,
@@ -1330,8 +1346,8 @@ export default function ManagerPortal() {
       queueFilter === "all"
         ? true
         : queueFilter === "awaiting"
-        ? t.status === "awaiting_approval"
-        : ["resolved", "rejected", "escalated"].includes(t.status);
+        ? t.status === "awaiting_approval" || t.status === "escalated"
+        : ["resolved", "rejected"].includes(t.status);
 
     const matchesSearch =
       !queueSearch ||

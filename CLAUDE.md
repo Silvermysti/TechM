@@ -52,6 +52,9 @@ Domain pipelines:
 - **Structured-output, not tool-calling:** the LLM returns a Pydantic decision object
   (`services/llm.py` `decide()`); our Python code calls DB tools. Deterministic + testable.
 - **Human-in-the-loop:** `interrupt()` pauses the graph; `Command(resume=...)` resumes it.
+  **Escalate ≠ terminal:** a manager's `escalate` does NOT resume the graph — `decide_ticket` just
+  re-labels the ticket `escalated` (interrupt stays pending) and re-queues it; a later approve/reject
+  resumes the same paused thread. (Same-role for now; `senior_manager` separation is a planned refinement.)
 - **Tiered autonomy:** low-cost + high-confidence + low-fraud claims auto-finalize; clear
   `reject` decisions also auto-finalize (no manager needed for clean denials); everything else
   waits for a manager. Logic in `orchestrator.py` `autonomy_router`; thresholds in `config.py`.
@@ -103,7 +106,7 @@ Shared: `lib/api.ts` (REST + 401 auto-redirect), `lib/auth.ts`, `lib/useSSE.ts`,
 
 ## Current state
 Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWARD-PLAN.md`).
-68 tests passing, TypeScript clean.
+70 tests passing, TypeScript clean.
 - **Phase 5:** password + JWT auth with roles
 - **Phase 6:** durable LangGraph checkpointer, DB-backed intake sessions, unique claim numbers
 - **Phase 7:** notifications (`services/notify.py`), claim lifecycle (pay/close), audit API
