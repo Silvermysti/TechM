@@ -79,13 +79,22 @@ def stub_domain(state: AfterSalesState) -> dict:
 
 
 def autonomy_router(state: AfterSalesState) -> str:
-    """Tiered autonomy (Wave A): only a clearly-safe warranty claim auto-finalizes;
-    anything else routes to a human. Thresholds live in config."""
+    """Tiered autonomy:
+    - 'reject' decisions always auto-finalize (no manager needed for clear denials).
+    - 'approve' decisions auto-finalize only when all safety thresholds pass.
+    - Everything else (escalate, high cost, high fraud) routes to a human.
+    """
     s = get_settings()
     rec = state.get("recommendation") or {}
+    decision = rec.get("decision")
+
+    # Clear rejections (e.g. component not covered, out of warranty) close automatically.
+    if decision == "reject":
+        return "auto"
+
     if (
         s.auto_approve_enabled
-        and rec.get("decision") == "approve"
+        and decision == "approve"
         and (rec.get("confidence") or 0.0) >= s.auto_approve_min_confidence
         and (state.get("fraud_risk") or 0.0) <= s.auto_approve_max_fraud
         and (state.get("estimated_cost") or 0.0) <= s.auto_approve_max_cost
@@ -95,8 +104,9 @@ def autonomy_router(state: AfterSalesState) -> str:
 
 
 def auto_approve(state: AfterSalesState) -> dict:
-    """Record a system auto-approval (no human needed for low-risk, low-cost claims)."""
-    return {"human_decision": "approve", "auto_finalized": True}
+    """Record a system auto-finalization (covers both auto-approve and auto-reject)."""
+    decision = (state.get("recommendation") or {}).get("decision", "reject")
+    return {"human_decision": decision, "auto_finalized": True}
 
 
 def await_human(state: AfterSalesState) -> dict:

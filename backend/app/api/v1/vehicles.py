@@ -1,7 +1,8 @@
 """Vehicle self-registration and ownership transfer endpoints.
 
-Customers can claim a VIN they own. If the VIN is not in the database it is
-registered immediately. If it already belongs to someone else a transfer request
+Customers can claim a VIN that already exists in the database (seeded vehicles).
+Arbitrary VINs that are not in the system are rejected with 404 — a customer
+cannot invent a vehicle. If the VIN belongs to someone else a transfer request
 is created for manager review — the old owner retains access until approved.
 """
 
@@ -51,22 +52,14 @@ def claim_vin(
 
     vehicle = db.get(Vehicle, vin)
 
-    # Case 1: VIN not in DB — register it directly under the requester.
+    # VIN must already exist in the database (seeded/registered vehicles only).
     if vehicle is None:
-        vehicle = Vehicle(
-            vin=vin,
-            customer_id=principal.customer_id,
-            model="Unknown",
-            year=0,
-            purchase_date=None,
+        raise HTTPException(
+            status_code=404,
+            detail="VIN not found. Only vehicles registered in our system can be claimed.",
         )
-        db.add(vehicle)
-        _audit(db, actor=principal.customer_id or "", action="vehicle:self-registered",
-               resource_id=vin)
-        db.commit()
-        return VINClaimResult(status="registered", vin=vin)
 
-    # Case 2: already owned by the same customer.
+    # Case 1: already owned by the same customer.
     if vehicle.customer_id == principal.customer_id:
         return VINClaimResult(status="already_owned", vin=vin)
 
@@ -141,12 +134,8 @@ def approve_transfer(
 
     vehicle = db.get(Vehicle, transfer.vin)
     if vehicle is None:
-        # VIN was never in DB (shouldn't happen via claim flow, but guard it).
-        vehicle = Vehicle(vin=transfer.vin, customer_id=transfer.requester_id,
-                          model="Unknown", year=0, purchase_date=None)
-        db.add(vehicle)
-    else:
-        vehicle.customer_id = transfer.requester_id
+        raise HTTPException(status_code=404, detail="Vehicle record no longer exists.")
+    vehicle.customer_id = transfer.requester_id
 
     transfer.status = "approved"
     transfer.decided_at = datetime.now(timezone.utc)
