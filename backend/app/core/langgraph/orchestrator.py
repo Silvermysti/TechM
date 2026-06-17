@@ -21,6 +21,7 @@ from app.core.langgraph.domains.warranty import (
     warranty_evidence,
     warranty_fraud,
     warranty_recommend,
+    warranty_responsible_party,
     warranty_validate,
 )
 from app.core.langgraph.state import AfterSalesState
@@ -139,6 +140,7 @@ def build_graph():
     g.add_node("warranty_fraud", warranty_fraud)
     g.add_node("warranty_recommend", warranty_recommend)
     g.add_node("warranty_cost", warranty_cost)
+    g.add_node("warranty_responsible_party", warranty_responsible_party)
     g.add_node("auto_approve", auto_approve)
 
     # Recall pipeline
@@ -165,8 +167,9 @@ def build_graph():
     g.add_edge("warranty_validate", "warranty_fraud")
     g.add_edge("warranty_fraud", "warranty_recommend")
     g.add_edge("warranty_recommend", "warranty_cost")
+    g.add_edge("warranty_cost", "warranty_responsible_party")
     g.add_conditional_edges(
-        "warranty_cost", autonomy_router,
+        "warranty_responsible_party", autonomy_router,
         {"auto": "auto_approve", "human": "await_human"},
     )
     g.add_edge("auto_approve", "finalize")

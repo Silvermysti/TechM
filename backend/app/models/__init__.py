@@ -323,6 +323,36 @@ class WarrantyClaimLine(Base):
     claim: Mapped["WarrantyClaim"] = relationship(back_populates="lines")
 
 
+class SupplierRecovery(Base):
+    """A cost-recovery claim against a supplier (APQC 6.7.4).
+
+    Created when a manager acts on an approved, supplier-recoverable warranty claim.
+    Lifecycle: draft (AI-drafted, not sent) -> sent -> recovered.
+    """
+
+    __tablename__ = "supplier_recoveries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    claim_id: Mapped[str] = mapped_column(ForeignKey("warranty_claims.id"), unique=True)
+    supplier_id: Mapped[str | None] = mapped_column(
+        ForeignKey("suppliers.id"), nullable=True
+    )
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|sent|recovered
+    draft_subject: Mapped[str] = mapped_column(String(200), default="")
+    draft_body: Mapped[str] = mapped_column(Text, default="")
+
+    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recovered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class IntakeSession(Base):
     """Durable guided-intake conversation state (replaces the in-memory dict so the
     chat survives restarts and works across multiple workers). Expired by TTL."""

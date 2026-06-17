@@ -155,6 +155,42 @@ export function closeClaim(id: string): Promise<Claim> {
   return jsonFetch<Claim>(`/api/v1/claims/${id}/close`, { method: "POST" });
 }
 
+// --- Supplier recovery (APQC 6.7.4) --------------------------------------- //
+export type SupplierRecovery = {
+  id: string;
+  claim_id: string;
+  claim_number: string | null;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  amount: number;
+  currency: string;
+  status: "draft" | "sent" | "recovered";
+  draft_subject: string;
+  draft_body: string;
+  created_by: string | null;
+  decided_by: string | null;
+  created_at: string;
+  sent_at: string | null;
+  recovered_at: string | null;
+};
+
+export function generateRecovery(claimId: string): Promise<SupplierRecovery> {
+  return jsonFetch<SupplierRecovery>(`/api/v1/claims/${claimId}/recovery`, { method: "POST" });
+}
+
+export function listRecoveries(status?: string): Promise<SupplierRecovery[]> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return jsonFetch<SupplierRecovery[]>(`/api/v1/recoveries${q}`);
+}
+
+export function sendRecovery(id: string): Promise<SupplierRecovery> {
+  return jsonFetch<SupplierRecovery>(`/api/v1/recoveries/${id}/send`, { method: "POST" });
+}
+
+export function markRecovered(id: string): Promise<SupplierRecovery> {
+  return jsonFetch<SupplierRecovery>(`/api/v1/recoveries/${id}/recovered`, { method: "POST" });
+}
+
 export type PartItem = {
   id: string; part_name: string; sku: string; component: string;
   stock_qty: number; eta_days: number; unit_price: number; supplier: string;

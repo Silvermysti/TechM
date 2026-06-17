@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import audit, auth, claims, intake, metrics, parts, recalls, stream, tickets, vehicles
+from app.api.v1 import audit, auth, claims, intake, metrics, parts, recalls, recoveries, stream, tickets, vehicles
 from app.api.v1.intake import UPLOAD_DIR
 from app.config import get_settings
 from app.db.session import create_all
@@ -43,6 +43,7 @@ app.include_router(parts.router)
 app.include_router(stream.router)
 app.include_router(metrics.router)
 app.include_router(vehicles.router)
+app.include_router(recoveries.router)
 
 # Customer evidence photos (uploaded during intake).
 UPLOAD_DIR.mkdir(exist_ok=True)

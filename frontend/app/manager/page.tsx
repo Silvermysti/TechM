@@ -7,13 +7,19 @@ import {
   approveTransfer,
   closeClaim,
   decideTicket,
+  generateRecovery,
   getClaim,
   getMetrics,
   listAudit,
+  listClaims,
+  listRecoveries,
   listTickets,
   listTransfers,
+  markRecovered,
   payClaim,
   rejectTransfer,
+  sendRecovery,
+  type SupplierRecovery,
   type TrendMetrics,
   type VINTransfer,
 } from "@/lib/api";
@@ -1079,6 +1085,169 @@ function TransfersTab({
   );
 }
 
+// ─── Supplier Recovery Tab (APQC 6.7.4) ────────────────────────────────────────
+
+function RecoveryTab() {
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [recoveries, setRecoveries] = useState<SupplierRecovery[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [c, r] = await Promise.all([listClaims(), listRecoveries()]);
+      setClaims(c);
+      setRecoveries(r);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const recoveredClaimIds = new Set(recoveries.map((r) => r.claim_id));
+  // Approved/paid claims whose part is supplier-recoverable and have no recovery yet.
+  const eligible = claims.filter(
+    (c) => c.supplier_recoverable && !recoveredClaimIds.has(c.id),
+  );
+
+  const fmt = (n: number, ccy = "INR") =>
+    `${ccy === "INR" ? "₹" : ""}${n.toLocaleString("en-IN")}`;
+
+  const act = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key);
+    try {
+      await fn();
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Eligible claims → generate a recovery draft */}
+      <div className="space-y-3">
+        <p className="eyebrow">Recoverable Claims — awaiting recovery action</p>
+        {eligible.length === 0 ? (
+          <div className="card flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <span className="text-2xl text-faint">✓</span>
+            <p className="text-sm text-faint">
+              No claims awaiting supplier recovery.
+            </p>
+          </div>
+        ) : (
+          eligible.map((c) => (
+            <div
+              key={c.id}
+              className="card flex items-center justify-between gap-4 p-4 flex-wrap"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-bold text-ink">
+                    {c.claim_number}
+                  </span>
+                  <span className="chip text-[9px] border-info/40 text-info capitalize">
+                    {c.component}
+                  </span>
+                </div>
+                <p className="text-[12px] text-muted">
+                  Recoverable part cost{" "}
+                  <span className="font-semibold text-ink">{fmt(c.parts_cost, c.currency)}</span>{" "}
+                  · VIN <span className="font-mono">{c.vehicle_vin}</span>
+                </p>
+              </div>
+              <button
+                disabled={busy === c.id}
+                onClick={() => act(c.id, () => generateRecovery(c.id))}
+                className="rounded-xl border border-techm/40 bg-techm-soft/40 px-4 py-2 text-xs font-bold text-techm transition hover:bg-techm/10 disabled:opacity-50"
+              >
+                ✎ Generate Recovery Draft
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Existing recoveries */}
+      {recoveries.length > 0 && (
+        <div className="space-y-3">
+          <p className="eyebrow">Supplier Recovery Claims</p>
+          {recoveries.map((r) => {
+            const isOpen = open === r.id;
+            const tone =
+              r.status === "recovered"
+                ? "border-ok/40 text-ok"
+                : r.status === "sent"
+                ? "border-info/40 text-info"
+                : "border-warn/40 text-warn";
+            return (
+              <div key={r.id} className="card p-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-bold text-ink">
+                        {r.claim_number}
+                      </span>
+                      <span className={`chip text-[9px] capitalize ${tone}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-muted">
+                      {r.supplier_name} · recover{" "}
+                      <span className="font-semibold text-ink">{fmt(r.amount, r.currency)}</span>
+                    </p>
+                  </div>
+                  <div className="flex gap-2 flex-none">
+                    <button
+                      onClick={() => setOpen(isOpen ? null : r.id)}
+                      className="rounded-xl border border-line px-3 py-2 text-xs font-medium text-muted transition hover:text-ink"
+                    >
+                      {isOpen ? "Hide draft" : "View draft"}
+                    </button>
+                    {r.status === "draft" && (
+                      <button
+                        disabled={busy === r.id}
+                        onClick={() => act(r.id, () => sendRecovery(r.id))}
+                        className="rounded-xl border border-info/40 bg-info/10 px-4 py-2 text-xs font-bold text-info transition hover:bg-info/20 disabled:opacity-50"
+                      >
+                        ➤ Mark as Sent
+                      </button>
+                    )}
+                    {r.status === "sent" && (
+                      <button
+                        disabled={busy === r.id}
+                        onClick={() => act(r.id, () => markRecovered(r.id))}
+                        className="rounded-xl border border-ok/40 bg-ok-soft px-4 py-2 text-xs font-bold text-ok transition hover:bg-ok/10 disabled:opacity-50"
+                      >
+                        ✓ Mark Recovered
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="mt-3 space-y-2 rounded-xl border border-line bg-raised p-3">
+                    <p className="text-[11px] font-semibold text-ink">
+                      {r.draft_subject}
+                    </p>
+                    <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted">
+                      {r.draft_body}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ManagerPortal() {
@@ -1088,9 +1257,9 @@ export default function ManagerPortal() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"queue" | "audit" | "monitor" | "trends" | "transfers">(
-    "queue",
-  );
+  const [tab, setTab] = useState<
+    "queue" | "audit" | "monitor" | "trends" | "transfers" | "recovery"
+  >("queue");
 
   // Transfers state
   const [transfers, setTransfers] = useState<VINTransfer[]>([]);
@@ -1305,12 +1474,13 @@ export default function ManagerPortal() {
 
         {/* ── Tab Bar ── */}
         <div className="flex items-end gap-0 border-b border-line">
-          {(["queue", "monitor", "trends", "transfers", "audit"] as const).map((t) => {
+          {(["queue", "monitor", "trends", "transfers", "recovery", "audit"] as const).map((t) => {
             const LABELS: Record<string, string> = {
               queue:     "Approval Queue",
               monitor:   "Agent Monitor",
               trends:    "Performance",
               transfers: "Transfers",
+              recovery:  "Supplier Recovery",
               audit:     "Audit Log",
             };
             const isActive = tab === t;
@@ -1523,6 +1693,12 @@ export default function ManagerPortal() {
               onApprove={handleApproveTransfer}
               onReject={handleRejectTransfer}
             />
+          </div>
+        )}
+
+        {tab === "recovery" && (
+          <div className="mt-1">
+            <RecoveryTab />
           </div>
         )}
 

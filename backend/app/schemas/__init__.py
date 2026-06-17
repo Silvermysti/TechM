@@ -101,6 +101,15 @@ class WarrantyRecommendation(BaseModel):
         return v.lower() if isinstance(v, str) else v
 
 
+class SupplierRecoveryDraft(BaseModel):
+    """LLM output: a drafted supplier cost-recovery claim email (APQC 6.7.4)."""
+
+    subject: str = Field(description="concise email subject line referencing the claim")
+    body: str = Field(
+        description="professional cost-recovery email body addressed to the supplier"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # API contracts
 # --------------------------------------------------------------------------- #
@@ -335,6 +344,26 @@ class WarrantyClaimOut(BaseModel):
     lines: list[ClaimLineOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierRecoveryOut(BaseModel):
+    """API view of a supplier cost-recovery claim (APQC 6.7.4)."""
+
+    id: str
+    claim_id: str
+    claim_number: str | None = None
+    supplier_id: str | None = None
+    supplier_name: str | None = None
+    amount: float
+    currency: str
+    status: str
+    draft_subject: str
+    draft_body: str
+    created_by: str | None = None
+    decided_by: str | None = None
+    created_at: datetime
+    sent_at: datetime | None = None
+    recovered_at: datetime | None = None
 
 
 # --------------------------------------------------------------------------- #

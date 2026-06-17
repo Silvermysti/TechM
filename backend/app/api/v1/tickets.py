@@ -19,15 +19,20 @@ from app.services.graph_runner import decide_ticket
 router = APIRouter(prefix="/api/v1", tags=["tickets"])
 
 
-@router.get("/tickets", response_model=list[TicketOut])
+@router.get("/tickets", response_model=list[TicketOut] | list[CustomerTicketOut])
 def list_tickets(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
-) -> list[Ticket]:
+) -> list[TicketOut] | list[CustomerTicketOut]:
     q = select(Ticket).order_by(Ticket.created_at.desc())
     if principal.role != "manager":
         q = q.where(Ticket.customer_id == principal.customer_id)
-    return list(db.scalars(q).all())
+    rows = list(db.scalars(q).all())
+    # Customers get the redacted view here too — the single-ticket route already does
+    # this, but the list must not leak fraud scores / agent reasoning either.
+    if principal.role == "customer":
+        return [CustomerTicketOut.from_ticket(t) for t in rows]
+    return [TicketOut.model_validate(t) for t in rows]
 
 
 @router.get("/tickets/{ticket_id}")

@@ -230,7 +230,31 @@ def warranty_cost(state: AfterSalesState) -> dict:
         "estimated_cost": costing["total_cost"],
         "context": context,
         "agent_outputs": _append_output(
-            state, {"agent": "Cost Estimator", "apqc": "6.7.3.4", "output": costing}
+            state, {"agent": "Cost Estimator", "apqc": "6.7.3.5", "output": costing}
+        ),
+    }
+
+
+def warranty_responsible_party(state: AfterSalesState) -> dict:
+    """Determine who bears the cost — manufacturer / supplier / indeterminate (APQC 6.7.3.4).
+
+    Drives supplier cost recovery (APQC 6.7.4). No LLM: money routing must be auditable."""
+    from app.db.session import SessionLocal
+    from app.tools.responsible_party import determine_responsible_party
+
+    db = SessionLocal()
+    try:
+        determination = determine_responsible_party(db, component=state.get("component"))
+    finally:
+        db.close()
+
+    context = dict(state.get("context") or {})
+    context["responsible_party"] = determination
+    return {
+        "context": context,
+        "agent_outputs": _append_output(
+            state, {"agent": "Responsible Party Specialist", "apqc": "6.7.3.4",
+                    "output": determination}
         ),
     }
 

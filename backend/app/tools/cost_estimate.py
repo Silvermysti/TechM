@@ -19,7 +19,6 @@ from app.models import (
     ClaimCode,
     Counter,
     PartInventory,
-    Supplier,
     Ticket,
     WarrantyClaim,
     WarrantyClaimLine,
@@ -102,18 +101,12 @@ def build_warranty_claim(
     """Create and persist a costed WarrantyClaim (+ line items) for a ticket."""
     costing = estimate_cost(db, component=ticket.component)
 
-    # Resolve the supplier from the matching part, for cost-recovery routing.
-    supplier_id: str | None = None
-    recoverable = False
-    if costing["part_sku"]:
-        part = db.execute(
-            select(PartInventory).where(PartInventory.sku == costing["part_sku"])
-        ).scalars().first()
-        if part and part.supplier_id:
-            supplier_id = part.supplier_id
-            supplier = db.get(Supplier, part.supplier_id)
-            # Non-OEM supplier parts are recoverable from the vendor.
-            recoverable = bool(supplier and not supplier.is_oem)
+    # Responsible-party determination (APQC 6.7.3.4) drives cost-recovery routing.
+    from app.tools.responsible_party import determine_responsible_party
+
+    party = determine_responsible_party(db, component=ticket.component)
+    supplier_id: str | None = party["supplier_id"]
+    recoverable: bool = party["recoverable_from_supplier"]
 
     approved = status == "approved"
     claim = WarrantyClaim(

@@ -299,15 +299,23 @@ manager sees the reasoning chain → Approve → customer status flips to Resolv
 
 ### PHASE 1.5 — Warranty depth (◀ ACTIVE — current focus)
 *Goal: take warranty from "demo skeleton" to a convincing, deep vertical covering the full APQC 6.7
-lifecycle. Full component map, ELI5, per-component tech stack, and rationale:*
-**`../Meet3-prep/warranty-component-plan.md`** (the active plan of record).
+lifecycle.*
 
-**Locked build order** (front-load cheap visible wins → hard "wow" → depth):
-1. Claim-history fraud signal · 2. Cost estimator (₹) · 3. Smart tiered auto-approve ·
-4. Audit log · 5. Real notifications (email + ref #) · 6. Photo upload + **vision** (Groq) ·
-7. Policy **RAG** · 8. Depth tail (claim-codes, pay/close, supplier recovery, dashboard, CSAT, eval harness).
+**Plan of record (current): `FORWARD-PLAN.md`** — supersedes the older ordering below. Target ("done")
+picture: `WARRANTY-BLUEPRINT.md`. Full APQC scope across all six domains: `APQC-COVERAGE.md`.
 
-Each maps to a real APQC 6.7 process. **Decision: planned, build later** — no code written yet for these.
+**Done so far (the decision spine):** claim-history fraud · cost estimator (₹) · tiered auto-approve
+(+ auto-reject) · audit log · photo upload + **vision** evidence (Groq) · pay/close lifecycle ·
+metrics dashboard · email **stub**.
+
+**Next — finish the pipeline first, then the performance layer** (see `FORWARD-PLAN.md` for files/tests):
+- **Part A (pipeline):** A1 responsible-party (6.7.3.4) → A2 supplier recovery (6.7.4) →
+  A3 real payment (6.7.3.7) → A4 reconcile (6.7.3.9) → B1 real notifications (6.7.3.6) →
+  B2 appeals (6.7.3.6) → C1 preauthorization (6.7.2.6) → C2 warranty activation (6.7.1).
+- **Part B (performance layer, after the pipeline):** Policy RAG · CSAT · defect cluster + CAPA · eval harness.
+
+> **APQC note:** `6.7.3.4` = *Determine responsible party* (the A1 node). Cost estimation has no
+> dedicated APQC sub-code and is tagged under `6.7.3.5` (the decision). Corrected in code + deck.
 
 ---
 
@@ -332,10 +340,11 @@ New user → POST /auth/register → account created, no vehicles yet
                  │
                  └─► POST /api/v1/vehicles/claim  (VIN + optional RC photo)
                            │
-                           ├─ VIN not in DB          → auto-register (no prior owner)
-                           │                            vehicle.customer_id = new owner
+                           ├─ VIN not in DB          → 404 "VIN not found" (UPDATED)
+                           │                            only seeded/registered vehicles can be claimed;
+                           │                            customers cannot invent a vehicle
                            │
-                           ├─ VIN owned by same user  → 409 "already registered"
+                           ├─ VIN owned by same user  → "already_owned"
                            │
                            └─ VIN owned by another    → create VINTransferRequest (pending)
                                                          old owner: read-only, cannot file new claims
@@ -379,8 +388,9 @@ photo, manager approves the transfer → original owner can no longer claim on t
 owner submits a warranty claim successfully.
 
 **Open questions (settle before building):**
-1. Should "auto-register" (VIN not yet in DB) require manager approval too, or fully self-service?
-   *Current plan: fully self-service — no prior owner means no dispute.*
+1. ~~Should "auto-register" (VIN not yet in DB) require manager approval?~~ **RESOLVED:** auto-register
+   was removed entirely — an unknown VIN now returns **404**. Only seeded/registered vehicles can be
+   claimed, so customers cannot invent a vehicle.
 2. During a pending transfer, should the original owner still be able to file claims?
    *Current plan: yes — until transfer is approved, they retain full access.*
 3. When vision (C9) is added: RC is read by AI → name/VIN extracted → auto-approve if match.
