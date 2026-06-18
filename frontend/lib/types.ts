@@ -31,6 +31,7 @@ export type Ticket = {
   recommendation: Recommendation | null;
   agent_trace: AgentOutput[] | null;
   human_decision: string | null;
+  human_actor: string | null;
   claim_number: string | null;
   claim_id: string | null;
   attachments: Attachment[];

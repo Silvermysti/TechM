@@ -106,17 +106,17 @@ def _finalize_ticket(db: Session, ticket: Ticket, result: dict) -> None:
         decision = values.get("human_decision") or "resolved"
         ticket.status = values.get("final_status", "resolved")
         ticket.human_decision = decision
-        ticket.human_actor = "system:auto-approval"
+        ticket.human_actor = "system:auto"
         ticket.resolved_at = _now()
         if ticket.recommendation:
             rec = dict(ticket.recommendation)
             rec["final_decision"] = decision
             ticket.recommendation = rec
         if decision == "approve":
-            _record_warranty_claim(db, ticket, decided_by="system:auto-approval")
+            _record_warranty_claim(db, ticket, decided_by="system:auto")
         _emit(ticket.id, "ticket.resolved",
               {"decision": decision, "status": ticket.status})
-        _audit(db, actor_type="agent", actor_id="system:auto-approval",
+        _audit(db, actor_type="agent", actor_id="system:auto",
                action=f"auto-decision:{decision}", resource_id=ticket.id,
                after={"status": ticket.status})
 

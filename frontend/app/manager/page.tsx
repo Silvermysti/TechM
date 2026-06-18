@@ -960,10 +960,12 @@ function TrendsPanel() {
         <div className="card px-4 py-3.5">
           <p className="eyebrow">Rejected</p>
           <p className="kpi-number mt-1.5">{data.rejected}</p>
+          <p className="mt-1 text-[10px] text-faint">{data.auto_rejected} auto · {data.rejected - data.auto_rejected} human</p>
         </div>
         <div className="card px-4 py-3.5">
           <p className="eyebrow text-ok">Auto-finalized</p>
-          <p className="kpi-number mt-1.5 text-ok">{data.auto_approved}</p>
+          <p className="kpi-number mt-1.5 text-ok">{data.auto_approved + data.auto_rejected}</p>
+          <p className="mt-1 text-[10px] text-faint">{data.auto_approved} approve · {data.auto_rejected} reject</p>
         </div>
       </div>
     </div>
@@ -1321,8 +1323,10 @@ export default function ManagerPortal() {
   const done = tickets.filter((t) =>
     ["resolved", "rejected"].includes(t.status),
   );
+  // Auto-approved = the pipeline finalized it with no manager. The decision lives in
+  // human_decision; the "who" is human_actor === "system:auto".
   const autoApproved = tickets.filter(
-    (t) => t.status === "resolved" && t.human_decision === null,
+    (t) => t.human_actor === "system:auto" && t.human_decision === "approve",
   ).length;
   const humanApproved = done.filter((t) => t.human_decision === "approve").length;
   const rejected = done.filter(

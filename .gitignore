@@ -19,3 +19,6 @@ pgdata/
 
 # Customer-uploaded evidence photos
 backend/uploads/
+
+# Local runtime databases — never commit
+*.db

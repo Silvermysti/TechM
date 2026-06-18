@@ -224,6 +224,9 @@ class TicketOut(BaseModel):
     recommendation: dict | None = None
     agent_trace: list | None = None
     human_decision: str | None = None
+    # Who finalized it: a manager's actor id, or "system:auto" when the pipeline
+    # auto-finalized (high-confidence/low-fraud approve, or a clean reject).
+    human_actor: str | None = None
     claim_number: str | None = None
     claim_id: str | None = None
     attachments: list[AttachmentOut] = []

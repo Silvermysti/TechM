@@ -223,6 +223,7 @@ export type DomainStat = {
 export type TrendMetrics = {
   total_tickets: number;
   auto_approved: number;
+  auto_rejected: number;
   human_approved: number;
   rejected: number;
   awaiting: number;

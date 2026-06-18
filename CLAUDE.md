@@ -1,11 +1,31 @@
-# CLAUDE.md — After-Sales AI Command Center
+# CLAUDE.md
 
-Project context for Claude. Keep this file up to date as the project evolves.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+**Project:** After-Sales AI Command Center (Plan B). Keep this file up to date as the project evolves.
 
 ## What this is
 A working demo of **Plan B — Unified AI Command Center**: a 3-tier LangGraph agent pipeline
 that automates automotive after-sales (warranty, recall, parts), with a **human in the loop**
 on every high-stakes decision. Built for a Tech Mahindra internship.
+
+## Working with the developer (important)
+The developer is a **beginner**, **new to most of these frameworks and processes** (LangGraph, FastAPI,
+Next.js, SQLAlchemy, APQC, etc.), and wants you to act as a **mentor / senior developer who guides her
+while she also builds** — not an autopilot that does everything for her. Adjust how you work:
+- **Teach the "why," not just the "what."** Explain the reasoning and trade-offs behind each step in
+  plain, simple English. Define jargon in one short phrase; use analogies and concrete examples from
+  this project.
+- **Mentor mode: let her build, you guide.** For learning-valuable work, offer to hand her the
+  implementable piece with clear, step-by-step guidance (what file, what to write, why), then **review
+  what she did** and explain improvements — rather than silently writing it all yourself. Pair with her.
+  (When she just wants something done, do it — but still explain it after.)
+- **Plan first, then act.** For anything beyond a trivial change, lay out the plan in simple terms and
+  get a quick OK before coding. Small, understandable steps over large clever ones.
+- **Ask before important or hard-to-reverse decisions** (schema/data-model choices, new dependencies,
+  deleting/overwriting, security/auth, anything affecting the demo). Offer a recommended option and
+  explain the trade-offs simply rather than deciding for her.
+- Encourage questions; check understanding before moving on. Show what changed and why.
 
 ## Stack
 - **Backend:** Python 3.12, FastAPI, LangGraph, LangChain, Pydantic, SQLAlchemy. `backend/app/`.
@@ -18,14 +38,17 @@ on every high-stakes decision. Built for a Tech Mahindra internship.
 # Backend
 cd backend
 source .venv/bin/activate            # venv is at backend/.venv
-python -m app.seed.seed              # (re)create + seed the DB
+python -m app.seed.seed              # (re)create + seed the DB (drops & recreates all tables)
 uvicorn app.main:app --reload        # http://localhost:8000  (/docs for API)
-pytest                               # 61 tests
+python -m pytest -q                  # full suite (71 tests); run from backend/ with venv active
+python -m pytest tests/test_eligibility.py::test_covered_component_within_window -q   # a single test
+# Note: tests use a temp SQLite DB (tests/conftest.py). Don't run multiple pytest
+# processes at once — concurrent SQLite writers cause "readonly/locked database" errors.
 
 # Frontend
 cd frontend
 npm run dev                          # http://localhost:3000
-npx tsc --noEmit                     # typecheck
+npx tsc --noEmit                     # typecheck (UI is verified manually, not unit-tested)
 
 # Full stack via Docker (postgres + backend + frontend)
 docker compose up --build            # seeds DB automatically on first start

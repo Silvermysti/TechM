@@ -90,6 +90,8 @@ def generate_recovery(
     rec = SupplierRecovery(
         claim_id=claim.id,
         supplier_id=claim.supplier_id,
+        # Recover the part cost only — the supplier is liable for their defective part,
+        # not our labour. (Intentional; some real chargebacks also bill labour.)
         amount=claim.parts_cost,
         currency=claim.currency,
         status="draft",

@@ -25,6 +25,7 @@ class DomainStat(BaseModel):
 class TrendMetrics(BaseModel):
     total_tickets: int
     auto_approved: int
+    auto_rejected: int
     human_approved: int
     rejected: int
     awaiting: int
@@ -38,13 +39,19 @@ class TrendMetrics(BaseModel):
 def get_metrics(db: Session = Depends(get_db)) -> TrendMetrics:
     tickets = list(db.scalars(select(Ticket)).all())
     total = len(tickets)
+    # "system:auto" = the system auto-finalized it (no manager). The decision itself
+    # (approve / reject) is in human_decision, so we split auto by that.
     auto_approved = sum(
         1 for t in tickets
-        if t.human_actor == "system:auto-approval" and t.status == "resolved"
+        if t.human_actor == "system:auto" and t.human_decision == "approve"
+    )
+    auto_rejected = sum(
+        1 for t in tickets
+        if t.human_actor == "system:auto" and t.human_decision == "reject"
     )
     human_approved = sum(
         1 for t in tickets
-        if t.human_decision == "approve" and t.human_actor != "system:auto-approval"
+        if t.human_decision == "approve" and t.human_actor != "system:auto"
     )
     rejected = sum(1 for t in tickets if t.human_decision == "reject")
     awaiting = sum(1 for t in tickets if t.status == "awaiting_approval")
@@ -72,7 +79,8 @@ def get_metrics(db: Session = Depends(get_db)) -> TrendMetrics:
             domain_map[d] = DomainStat(domain=d, count=0, approved=0, rejected=0)
         s = domain_map[d]
         s.count += 1
-        if t.human_decision == "approve" or t.human_actor == "system:auto-approval":
+        # Auto-finalized tickets also set human_decision, so this covers both paths.
+        if t.human_decision == "approve":
             s.approved += 1
         elif t.human_decision == "reject":
             s.rejected += 1
@@ -90,6 +98,7 @@ def get_metrics(db: Session = Depends(get_db)) -> TrendMetrics:
     return TrendMetrics(
         total_tickets=total,
         auto_approved=auto_approved,
+        auto_rejected=auto_rejected,
         human_approved=human_approved,
         rejected=rejected,
         awaiting=awaiting,
