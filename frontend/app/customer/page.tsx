@@ -7,6 +7,7 @@ import {
   claimVIN,
   getTicket,
   sendIntake,
+  submitCsat,
   uploadIntakeImage,
   type VINClaimResult,
 } from "@/lib/api";
@@ -209,6 +210,69 @@ function dotClass(status: string): string {
   return "dot dot-muted";
 }
 
+// ─── CSAT (satisfaction) prompt ──────────────────────────────────────────────
+// Shown once a claim is concluded. Records a 1–5 rating (APQC 6.7.5.1).
+
+function CsatPrompt({ ticket }: { ticket: Ticket }) {
+  const [score, setScore] = useState<number>(ticket.csat_score ?? 0);
+  const [done, setDone] = useState<boolean>(ticket.csat_score != null);
+  const [hover, setHover] = useState<number>(0);
+  const [comment, setComment] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  if (done) {
+    return (
+      <div className="rounded-xl border border-line bg-raised px-4 py-3">
+        <p className="eyebrow mb-1">Thanks for your feedback</p>
+        <p className="text-sm text-muted">
+          You rated this experience {score} / 5. We use this to improve our service.
+        </p>
+      </div>
+    );
+  }
+
+  const send = async (value: number) => {
+    setBusy(true);
+    try {
+      await submitCsat(ticket.id, value, comment);
+      setScore(value);
+      setDone(true);
+    } catch {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-line bg-raised px-4 py-3">
+      <p className="eyebrow mb-2">How was your experience?</p>
+      <div className="flex items-center gap-1.5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            disabled={busy}
+            onClick={() => send(n)}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+            className={`text-2xl leading-none transition disabled:opacity-50 ${
+              n <= (hover || score) ? "text-warn" : "text-faint hover:text-warn/60"
+            }`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+      <input
+        type="text"
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Optional: tell us why"
+        className="mt-2 w-full rounded-lg border border-line bg-base px-3 py-1.5 text-sm text-ink placeholder:text-faint focus:border-techm focus:outline-none"
+      />
+    </div>
+  );
+}
+
 // ─── Status Tracker ────────────────────────────────────────────────────────────
 
 function StatusTracker({ ticketId, onNew }: { ticketId: string; onNew: () => void }) {
@@ -358,6 +422,8 @@ function StatusTracker({ ticketId, onNew }: { ticketId: string; onNew: () => voi
               </p>
             </div>
           )}
+
+          {ticket && status !== "escalated" && <CsatPrompt ticket={ticket} />}
         </div>
       )}
 

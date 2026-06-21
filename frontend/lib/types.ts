@@ -3,6 +3,7 @@ export type Recommendation = {
   confidence: number;
   reasoning: string;
   draft_email: string;
+  cited_clause?: string | null;
   final_decision?: string;
 };
 
@@ -34,6 +35,9 @@ export type Ticket = {
   human_actor: string | null;
   claim_number: string | null;
   claim_id: string | null;
+  csat_score?: number | null;
+  // Present only on the customer-redacted view (CustomerTicketOut).
+  decision_message?: string | null;
   attachments: Attachment[];
 };
 

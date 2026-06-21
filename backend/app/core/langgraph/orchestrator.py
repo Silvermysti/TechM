@@ -20,6 +20,7 @@ from app.core.langgraph.domains.warranty import (
     warranty_cost,
     warranty_evidence,
     warranty_fraud,
+    warranty_policy_lookup,
     warranty_recommend,
     warranty_responsible_party,
     warranty_validate,
@@ -37,11 +38,21 @@ _FINAL_STATUS = {"approve": "resolved", "reject": "rejected", "escalate": "escal
 # Nodes
 # --------------------------------------------------------------------------- #
 def classify_and_enrich(state: AfterSalesState) -> dict:
-    """Enrich context with customer/vehicle data from the DB."""
+    """Enrich context with customer/vehicle data from the DB.
+
+    Also normalizes the free-text component ("alternator") to the policy's coverage
+    category ("electrical") so downstream coverage/cost/responsible-party matching
+    works — the customer's raw term is kept on the ticket for display.
+    """
     from app.db.session import SessionLocal
     from app.models import Customer, Vehicle
+    from app.tools.component_map import canonical_component
 
     context = dict(state.get("context") or {})
+    raw_component = state.get("component")
+    component = canonical_component(raw_component)
+    if raw_component and component != (raw_component or "").strip().lower():
+        context["component_raw"] = raw_component
     vin = state.get("vehicle_vin")
     customer_id = state.get("customer_id")
     if vin:
@@ -58,7 +69,7 @@ def classify_and_enrich(state: AfterSalesState) -> dict:
                                            "email": customer.email}
         finally:
             db.close()
-    return {"context": context, "customer_id": customer_id}
+    return {"context": context, "customer_id": customer_id, "component": component}
 
 
 def domain_router(state: AfterSalesState) -> str:
@@ -137,6 +148,7 @@ def build_graph():
     # Warranty pipeline
     g.add_node("warranty_evidence", warranty_evidence)
     g.add_node("warranty_validate", warranty_validate)
+    g.add_node("warranty_policy_lookup", warranty_policy_lookup)
     g.add_node("warranty_fraud", warranty_fraud)
     g.add_node("warranty_recommend", warranty_recommend)
     g.add_node("warranty_cost", warranty_cost)
@@ -164,7 +176,8 @@ def build_graph():
 
     # Warranty flow — evidence runs first (skips silently if no photo attached)
     g.add_edge("warranty_evidence", "warranty_validate")
-    g.add_edge("warranty_validate", "warranty_fraud")
+    g.add_edge("warranty_validate", "warranty_policy_lookup")
+    g.add_edge("warranty_policy_lookup", "warranty_fraud")
     g.add_edge("warranty_fraud", "warranty_recommend")
     g.add_edge("warranty_recommend", "warranty_cost")
     g.add_edge("warranty_cost", "warranty_responsible_party")

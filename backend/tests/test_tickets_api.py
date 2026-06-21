@@ -176,6 +176,49 @@ def test_endpoints_require_auth(client):
     assert client.get("/uploads/anything.jpg").status_code == 404  # static mount removed
 
 
+def test_csat_flow(client, customer_headers, manager_headers, monkeypatch):
+    """Customer can rate a concluded claim once; ratings surface in metrics."""
+    from app.core.langgraph import intake
+    from app.services import llm
+
+    monkeypatch.setattr(intake, "default_decider", _fake_intake)
+    monkeypatch.setattr(llm, "decide", _fake_decide)
+
+    r = client.post("/api/v1/intake", json={
+        "session_id": "csat1", "message": "AC failed", "vin": "MA3DEMO00000SWIFT",
+    }, headers=customer_headers)
+    ticket_id = r.json()["ticket_id"]
+
+    # Cannot rate while the claim is still awaiting a decision.
+    early = client.post(f"/api/v1/tickets/{ticket_id}/csat",
+                        json={"score": 5}, headers=customer_headers)
+    assert early.status_code == 409
+
+    # Manager approves -> resolved -> now rateable.
+    client.post(f"/api/v1/tickets/{ticket_id}/decision",
+                json={"decision": "approve"}, headers=manager_headers)
+
+    ok = client.post(f"/api/v1/tickets/{ticket_id}/csat",
+                     json={"score": 4, "comment": "smooth"}, headers=customer_headers)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["csat_score"] == 4
+
+    # Cannot rate twice.
+    again = client.post(f"/api/v1/tickets/{ticket_id}/csat",
+                        json={"score": 1}, headers=customer_headers)
+    assert again.status_code == 409
+
+    # Out-of-range score rejected by validation.
+    bad = client.post(f"/api/v1/tickets/{ticket_id}/csat",
+                      json={"score": 9}, headers=customer_headers)
+    assert bad.status_code == 422
+
+    # Shows up in manager metrics.
+    metrics = client.get("/api/v1/metrics", headers=manager_headers).json()
+    assert metrics["csat_responses"] >= 1
+    assert metrics["avg_csat"] is not None
+
+
 def test_customer_cannot_decide(client, customer_headers, monkeypatch):
     from app.core.langgraph import intake
     from app.services import llm

@@ -432,6 +432,31 @@ function TicketDetailPanel({
 
             <p className="mt-4 text-[13px] leading-relaxed text-muted">{rec.reasoning}</p>
 
+            {rec.cited_clause && (
+              <div className="mt-3 rounded-lg border border-line bg-raised p-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-faint">
+                  Policy basis ·{" "}
+                  <span className="text-accent">{rec.cited_clause}</span>
+                </p>
+                {(() => {
+                  // Pull the cited clause's wording from the Policy Reference (RAG) step.
+                  const ragStep = ticket.agent_trace?.find(
+                    (s) => s.agent === "Policy Reference (RAG)",
+                  );
+                  const clauses =
+                    (ragStep?.output?.clauses as
+                      | { id: string; text: string }[]
+                      | undefined) ?? [];
+                  const cited = clauses.find((c) => c.id === rec.cited_clause);
+                  return cited ? (
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+                      “{cited.text}”
+                    </p>
+                  ) : null;
+                })()}
+              </div>
+            )}
+
             {rec.draft_email && (
               <div className="mt-4">
                 <button
@@ -893,6 +918,18 @@ function TrendsPanel() {
               avg AI confidence {Math.round(data.avg_confidence * 100)}%
             </p>
           )}
+        </div>
+        <div className="card relative overflow-hidden px-5 py-4">
+          <span className="absolute inset-x-0 top-0 h-[3px] bg-warn" />
+          <p className="eyebrow">Customer Satisfaction</p>
+          <p className="kpi-number mt-2">
+            {data.avg_csat !== null ? `${data.avg_csat.toFixed(1)} ★` : "—"}
+          </p>
+          <p className="mt-1 text-[11px] text-faint">
+            {data.csat_responses > 0
+              ? `${data.csat_responses} response${data.csat_responses > 1 ? "s" : ""}`
+              : "no ratings yet"}
+          </p>
         </div>
       </div>
 

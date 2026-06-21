@@ -76,8 +76,8 @@ def _schema_description(schema: type[BaseModel]) -> str:
 def _get_vision_model() -> BaseChatModel:
     """Return a vision-capable model for the configured provider."""
     settings = get_settings()
-    provider = settings.llm_provider
-    model_name = settings.model_for("vision")
+    provider = settings.vision_provider_name()
+    model_name = settings.vision_model()
 
     if provider == "ollama":
         from langchain_ollama import ChatOllama
@@ -89,8 +89,8 @@ def _get_vision_model() -> BaseChatModel:
 
         return ChatOpenAI(
             model=model_name,
-            base_url=settings.base_url(),
-            api_key=settings.api_key() or "missing",
+            base_url=settings.vision_base_url(),
+            api_key=settings.vision_api_key() or "missing",
             temperature=0.0,
             model_kwargs={"response_format": {"type": "json_object"}},
         )

@@ -40,7 +40,8 @@ cd backend
 source .venv/bin/activate            # venv is at backend/.venv
 python -m app.seed.seed              # (re)create + seed the DB (drops & recreates all tables)
 uvicorn app.main:app --reload        # http://localhost:8000  (/docs for API)
-python -m pytest -q                  # full suite (71 tests); run from backend/ with venv active
+python -m pytest -q                  # full suite (96 tests); run from backend/ with venv active
+python -m tests.eval.run_eval        # on-demand LLM decision-quality eval (uses .env provider)
 python -m pytest tests/test_eligibility.py::test_covered_component_within_window -q   # a single test
 # Note: tests use a temp SQLite DB (tests/conftest.py). Don't run multiple pytest
 # processes at once — concurrent SQLite writers cause "readonly/locked database" errors.
@@ -132,7 +133,7 @@ Shared: `lib/api.ts` (REST + 401 auto-redirect), `lib/auth.ts`, `lib/useSSE.ts`,
 
 ## Current state
 Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWARD-PLAN.md`).
-71 tests passing, TypeScript clean.
+96 tests passing, TypeScript clean.
 - **Phase 5:** password + JWT auth with roles
 - **Phase 6:** durable LangGraph checkpointer, DB-backed intake sessions, unique claim numbers
 - **Phase 7:** notifications (`services/notify.py`), claim lifecycle (pay/close), audit API
@@ -155,10 +156,20 @@ Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWA
 - **A2 ✅ DONE:** supplier recovery workflow (APQC 6.7.4) — `SupplierRecovery` model,
   `services/supplier_recovery.py` (LLM draft), `api/v1/recoveries.py` (generate→send→recovered),
   manager "Supplier Recovery" tab. Lifecycle: draft → sent → recovered (writes `claim.recovered_amount`).
+- **Performance layer ✅ DONE (Policy RAG, CSAT, eval):**
+  - **Policy RAG** (6.7.2) — `data/warranty_terms.py` (clause knowledge base) +
+    `services/retrieval.py` (semantic search via `sentence-transformers`, keyword fallback if
+    unavailable) + `warranty_policy_lookup` node. Recommendation cites the decisive clause id
+    (`WarrantyRecommendation.cited_clause`), shown in the manager detail panel.
+  - **CSAT** (6.7.5.1) — `Ticket.csat_score/csat_comment`, `POST /tickets/{id}/csat` (customer,
+    once, only when concluded), star-rating prompt on the customer status page, avg CSAT KPI in
+    `/metrics` + manager trends.
+  - **Eval harness** — `tests/eval/` labeled scenarios + `run_eval.py` (decision-match + LLM-as-judge
+    reasoning score); `test_harness.py` unit-tests the scoring with a fake LLM.
 - **Next:** A3 real payment → A4 reconcile → B1 notifications → B2 appeals → C1 preauthorization →
   C2 activation → C3 investigation + **physical part-return/inspection loop** (gates A2 recovery + feeds
-  fraud) → Phase D (deadlines/SLAs, goodwill, proactive warranty-expiry outreach). Then performance
-  layer (Policy RAG, CSAT, CAPA, eval). Note: customer-facing **D2C design is intentional** (after-sales
+  fraud) → Phase D (deadlines/SLAs, goodwill, proactive warranty-expiry outreach). Remaining performance
+  item: CAPA. Note: customer-facing **D2C design is intentional** (after-sales
   = customer relations); dealer-submission is an optional additive channel, not a gap.
 
 > **APQC tagging:** `6.7.3.4` = *Determine responsible party*. Cost estimation has no dedicated APQC

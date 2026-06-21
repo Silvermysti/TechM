@@ -94,6 +94,10 @@ class WarrantyRecommendation(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     draft_email: str
+    # The id of the warranty clause the decision relied on (Policy RAG), e.g.
+    # "GEN-WEAR-01". Empty when no clause was decisive. Lets the manager audit the
+    # exact contract wording behind the call.
+    cited_clause: str | None = None
 
     @field_validator("decision", mode="before")
     @classmethod
@@ -246,6 +250,7 @@ class CustomerTicketOut(BaseModel):
     claim_number: str | None = None
     decision: str | None = None
     decision_message: str | None = None
+    csat_score: int | None = None
     attachments: list[AttachmentOut] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -262,8 +267,16 @@ class CustomerTicketOut(BaseModel):
             claim_number=getattr(t, "claim_number", None),
             decision=rec.get("final_decision") if isinstance(rec, dict) else None,
             decision_message=rec.get("draft_email") if isinstance(rec, dict) else None,
+            csat_score=getattr(t, "csat_score", None),
             attachments=getattr(t, "attachments", []),
         )
+
+
+class CSATRequest(BaseModel):
+    """Customer satisfaction submission (APQC 6.7.5.1)."""
+
+    score: int = Field(ge=1, le=5)
+    comment: str | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -54,6 +54,10 @@ class Settings(BaseSettings):
 
     # LLM
     llm_provider: str = "ollama"
+    # Vision can run on a *different* provider than text. E.g. text on deepseek
+    # (deepseek-chat can't read images) but photo evidence on groq's llama-4-scout.
+    # Empty = use llm_provider for vision too (original behaviour).
+    vision_provider: str = ""
     groq_api_key: str = ""
     deepseek_api_key: str = ""
     model_fast: str = ""
@@ -112,6 +116,27 @@ class Settings(BaseSettings):
 
     def base_url(self) -> str | None:
         return _PROVIDER_BASE_URL.get(self.llm_provider)
+
+    # ---- vision provider (may differ from the text provider) ----
+    def vision_provider_name(self) -> str:
+        """Provider used for image/vision calls; falls back to the text provider."""
+        return self.vision_provider or self.llm_provider
+
+    def vision_model(self) -> str:
+        if self.model_vision:
+            return self.model_vision
+        provider = self.vision_provider_name()
+        defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS["ollama"])
+        return defaults["vision"]
+
+    def vision_api_key(self) -> str:
+        return {
+            "groq": self.groq_api_key,
+            "deepseek": self.deepseek_api_key,
+        }.get(self.vision_provider_name(), "")
+
+    def vision_base_url(self) -> str | None:
+        return _PROVIDER_BASE_URL.get(self.vision_provider_name())
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

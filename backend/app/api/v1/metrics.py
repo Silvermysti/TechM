@@ -32,6 +32,8 @@ class TrendMetrics(BaseModel):
     failed: int
     avg_confidence: float | None = None
     total_claim_cost: float
+    avg_csat: float | None = None
+    csat_responses: int = 0
     domains: list[DomainStat]
 
 
@@ -71,6 +73,11 @@ def get_metrics(db: Session = Depends(get_db)) -> TrendMetrics:
     ).scalar_one_or_none()
     total_claim_cost = float(total_cost_row) if total_cost_row else 0.0
 
+    # Customer satisfaction (APQC 6.7.5.1): average of submitted 1-5 ratings.
+    csat_scores = [t.csat_score for t in tickets if t.csat_score is not None]
+    avg_csat = round(sum(csat_scores) / len(csat_scores), 2) if csat_scores else None
+    csat_responses = len(csat_scores)
+
     # Per-domain breakdown
     domain_map: dict[str, DomainStat] = {}
     for t in tickets:
@@ -105,5 +112,7 @@ def get_metrics(db: Session = Depends(get_db)) -> TrendMetrics:
         failed=failed,
         avg_confidence=avg_confidence,
         total_claim_cost=total_claim_cost,
+        avg_csat=avg_csat,
+        csat_responses=csat_responses,
         domains=list(domain_map.values()),
     )

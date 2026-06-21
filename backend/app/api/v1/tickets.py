@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, get_current_principal, require_manager
 from app.db.session import get_db
-from app.models import Ticket
-from app.schemas import CustomerTicketOut, DecisionRequest, TicketOut
+from app.models import AuditLog, Ticket
+from app.schemas import CSATRequest, CustomerTicketOut, DecisionRequest, TicketOut
 from app.services.graph_runner import decide_ticket
+
+# Statuses where the claim is concluded and a customer may rate their experience.
+_RATEABLE_STATUSES = {"resolved", "rejected", "closed", "paid"}
 
 router = APIRouter(prefix="/api/v1", tags=["tickets"])
 
@@ -50,6 +53,34 @@ def get_ticket(
     if principal.role == "customer":
         return CustomerTicketOut.from_ticket(ticket)
     return ticket
+
+
+@router.post("/tickets/{ticket_id}/csat", response_model=CustomerTicketOut)
+def submit_csat(
+    ticket_id: str,
+    req: CSATRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> CustomerTicketOut:
+    """Record a customer satisfaction rating after their claim is concluded (6.7.5.1)."""
+    ticket = db.get(Ticket, ticket_id)
+    # 404 (not 403) for someone else's ticket so we don't reveal it exists.
+    if ticket is None or ticket.customer_id != principal.customer_id:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    if ticket.status not in _RATEABLE_STATUSES:
+        raise HTTPException(status_code=409,
+                            detail="claim is not concluded yet — cannot rate")
+    if ticket.csat_score is not None:
+        raise HTTPException(status_code=409, detail="already rated")
+
+    ticket.csat_score = req.score
+    ticket.csat_comment = req.comment
+    db.add(AuditLog(actor_type="customer", actor_id=principal.customer_id or "",
+                    action="ticket:csat", resource_type="ticket", resource_id=ticket.id,
+                    after_state={"score": req.score, "comment": req.comment}))
+    db.commit()
+    db.refresh(ticket)
+    return CustomerTicketOut.from_ticket(ticket)
 
 
 @router.post("/tickets/{ticket_id}/decision", response_model=TicketOut)

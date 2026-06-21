@@ -136,6 +136,17 @@ export function getTicket(id: string): Promise<Ticket> {
   return jsonFetch<Ticket>(`/api/v1/tickets/${id}`);
 }
 
+export function submitCsat(
+  id: string,
+  score: number,
+  comment?: string,
+): Promise<Ticket> {
+  return jsonFetch<Ticket>(`/api/v1/tickets/${id}/csat`, {
+    method: "POST",
+    body: JSON.stringify({ score, comment: comment || null }),
+  });
+}
+
 export function decideTicket(
   id: string,
   decision: "approve" | "reject" | "escalate",
@@ -230,6 +241,8 @@ export type TrendMetrics = {
   failed: number;
   avg_confidence: number | null;
   total_claim_cost: number;
+  avg_csat: number | null;
+  csat_responses: number;
   domains: DomainStat[];
 };
 

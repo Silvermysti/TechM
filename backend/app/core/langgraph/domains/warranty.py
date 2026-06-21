@@ -59,10 +59,15 @@ Your reasoning MUST agree with your decision — never argue for one outcome and
 another. Base every statement only on the provided validation and fraud facts; do not
 invent coverage terms or history.
 
-Provide: confidence (0.0-1.0, how clear-cut the call is), concise reasoning, and a
-short, polite, professional draft email to the customer conveying the outcome. The
-email must not promise payment as final — it communicates the recommended outcome,
-pending confirmation."""
+You are given the relevant warranty clauses (each tagged with an id like SWIFT-AC-01).
+Ground your reasoning in these clauses — quote the decisive clause's wording in your
+reasoning, and put its id in the `cited_clause` field. If no clause is decisive, leave
+cited_clause empty. Never invent a clause id that was not provided.
+
+Provide: confidence (0.0-1.0, how clear-cut the call is), concise reasoning, the
+cited_clause id, and a short, polite, professional draft email to the customer conveying
+the outcome. The email must not promise payment as final — it communicates the
+recommended outcome, pending confirmation."""
 
 
 def _append_output(state: AfterSalesState, entry: dict) -> list[dict]:
@@ -169,6 +174,36 @@ def warranty_validate(state: AfterSalesState) -> dict:
     }
 
 
+def warranty_policy_lookup(state: AfterSalesState) -> dict:
+    """Policy RAG — retrieve the warranty clauses most relevant to this claim so the
+    recommendation can quote real contract wording instead of paraphrasing from memory.
+
+    Runs after validation (model + component are known by now) and stashes the top
+    clauses in context for `warranty_recommend`. Also records them as their own step in
+    the reasoning chain, so the manager can see exactly which clauses the AI was shown.
+    """
+    from app.services import retrieval
+
+    context = dict(state.get("context") or {})
+    component = state.get("component") or ""
+    description = state.get("summary") or state.get("input_text") or ""
+    model = (context.get("warranty") or {}).get("model")
+
+    query = f"{component}: {description}".strip().strip(":").strip()
+    clauses = retrieval.retrieve(query, model=model, k=2)
+    context["policy_clauses"] = clauses
+
+    return {
+        "context": context,
+        "agent_outputs": _append_output(
+            state,
+            {"agent": "Policy Reference (RAG)", "apqc": "6.7.2",
+             "output": {"query": query, "method": retrieval.backend_name(),
+                        "clauses": clauses}},
+        ),
+    }
+
+
 def warranty_fraud(state: AfterSalesState) -> dict:
     from app.db.session import SessionLocal
     from app.services import llm
@@ -263,10 +298,20 @@ def warranty_recommend(state: AfterSalesState) -> dict:
     from app.services import llm
 
     context = state.get("context") or {}
+
+    # Policy RAG: format the retrieved clauses so the model can quote real contract
+    # wording and cite the clause id it relied on.
+    clauses = context.get("policy_clauses") or []
+    if clauses:
+        clause_block = "\n".join(f"- [{c['id']}] {c['text']}" for c in clauses)
+    else:
+        clause_block = "(no policy clauses retrieved)"
+
     user = (
         f"Claim summary: {state.get('summary')}\n"
         f"Validation: {context.get('warranty')}\n"
-        f"Fraud risk: {state.get('fraud_risk')}"
+        f"Fraud risk: {state.get('fraud_risk')}\n"
+        f"Relevant warranty clauses (cite the decisive one by id):\n{clause_block}"
     )
     rec: WarrantyRecommendation = llm.decide(
         WarrantyRecommendation, system=RECOMMEND_SYSTEM, user=user, tier="standard"

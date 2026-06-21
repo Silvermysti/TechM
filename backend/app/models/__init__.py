@@ -190,6 +190,9 @@ class Ticket(Base):
     thread_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
     claim_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
     claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Post-resolution customer satisfaction (APQC 6.7.5.1): 1-5 rating + optional note.
+    csat_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    csat_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

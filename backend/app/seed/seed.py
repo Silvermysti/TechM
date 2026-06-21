@@ -163,6 +163,16 @@ def seed() -> None:
                        model="Swift VXI", year=2024,
                        purchase_date=today - timedelta(days=90)))
 
+        # A second clean demo account (same setup) so demos can be run from a fresh
+        # customer with no prior-claim history — keeps the fraud signal clean.
+        demo_cust2 = Customer(name="Meera Iyer", email="meera.demo@example.com",
+                              phone="+919898765432", password_hash=_DEMO_HASH)
+        db.add(demo_cust2)
+        db.flush()
+        db.add(Vehicle(vin="MA3DEMO00001SWIFT", customer_id=demo_cust2.id,
+                       model="Swift VXI", year=2024,
+                       purchase_date=today - timedelta(days=90)))
+
         # Guarantee a recall cohort: Honda City 2023 brakes — affected VINs.
         recall_cust = Customer(name="Recall Cohort", email="recall@example.com",
                                password_hash=_DEMO_HASH)
@@ -192,6 +202,7 @@ def seed() -> None:
               f"{len(CLAIM_CODES)} claim codes, {len(COMPONENTS_FOR_PARTS)} parts, "
               f"1 recall, 1 staff.")
         print(f"  Demo login: rajesh.demo@example.com / {DEMO_PASSWORD}")
+        print(f"  Demo login 2: meera.demo@example.com / {DEMO_PASSWORD}")
         print(f"  Manager login: {MANAGER_EMAIL} / {MANAGER_PASSWORD}")
     finally:
         db.close()
