@@ -87,8 +87,10 @@ def _build_summary(total: int, same_comp: int, recent: int, repeat: bool, compon
     if total == 0:
         return "No prior claims found for this VIN/customer."
     parts = [f"{total} prior claim(s)"]
-    if same_comp and component:
-        parts.append(f"{same_comp} for '{component}'")
+    # Always state the same-component count — including 0 — so a reader (or the LLM)
+    # cannot assume the prior claims were for the component now being claimed.
+    if component:
+        parts.append(f"{same_comp} of them for the same component ('{component}')")
     if recent:
         parts.append(f"{recent} in last 90 days")
     if repeat:

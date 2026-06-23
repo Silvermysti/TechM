@@ -21,15 +21,24 @@ CRITICAL DISTINCTION — fraud is NOT the same as coverage:
   fraud score for an out-of-coverage claim.
 
 Genuine fraud/anomaly signals (raise the score only for these):
-- Repeat claims for the same component in a short window (see claim history).
+- Repeat claims for the SAME component in a short window — this only applies when the
+  "prior claims for THIS SAME component" count is 1 or more. It is the strongest signal.
 - Vehicle age or mileage inconsistent with the reported failure.
 - Internal contradictions in the customer's description.
-- A history pattern flagged as repeat/abuse.
+- A history pattern explicitly flagged as repeat/abuse.
 
-Use ONLY the facts provided. Never invent prior claims, mileage, or history. If the
-claim history shows no prior claims and nothing in the description is anomalous, the
-fraud score must be LOW (<= 0.1). Give one or two sentences naming the specific signal
-you scored on (or stating that none was found)."""
+IMPORTANT about claim history:
+- "prior claims for THIS SAME component" is the only number that supports a same-component
+  repeat claim. If it is 0, you MUST NOT say or imply any prior claim was for this
+  component — there were none.
+- A few claims for DIFFERENT components is normal vehicle ownership, not fraud. Do not
+  score it as a same-component repeat; at most note it briefly as mild.
+- Quote the history numbers exactly. Never invent a component, count, mileage, or date.
+
+Use ONLY the facts provided. If the claim history shows no prior SAME-component claims
+and nothing in the description is anomalous, the fraud score must be LOW (<= 0.1). Give
+one or two sentences naming the specific signal you scored on (or stating that none was
+found), and make sure it matches the history numbers above."""
 
 EVIDENCE_SYSTEM = """You are a vehicle damage assessment specialist reviewing a \
 customer-submitted photo as part of a warranty claim evaluation.
@@ -228,7 +237,13 @@ def warranty_fraud(state: AfterSalesState) -> dict:
         f"Claim summary: {state.get('summary')}\n"
         f"Validation: {context.get('warranty')}\n"
         f"VIN: {vin}\n"
-        f"Claim history: {history['summary']}"
+        f"Component being claimed now: {component}\n"
+        f"Claim history (these are facts — do not contradict or add to them):\n"
+        f"  - total prior claims: {history['total_prior']}\n"
+        f"  - prior claims for THIS SAME component ({component}): {history['same_component']}\n"
+        f"  - prior claims in the last 90 days: {history['recent_90d']}\n"
+        f"  - repeat pattern flagged: {history['repeat_flag']}\n"
+        f"  - summary: {history['summary']}"
     )
     assessment: FraudAssessment = llm.decide(
         FraudAssessment, system=FRAUD_SYSTEM, user=user, tier="complex"
