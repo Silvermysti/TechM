@@ -113,14 +113,32 @@ log, claims API. LLM calls are monkeypatched so tests run offline and fast.
 
 ## Demo walkthrough
 
-### Warranty claim (full HITL loop)
+### Warranty claim (full HITL loop + Policy RAG + CSAT)
 1. Open http://localhost:3000 → **Login as Customer** (Rajesh)
 2. Pick **Warranty Issue**, describe: *"My AC stopped working 3 months after purchase"*
+   (optional: attach a photo — the vision node assesses whether it matches the claim)
 3. The agent asks one clarifying question if needed, then creates a ticket (returns in ~1s)
 4. Switch to **Manager Portal** → the ticket appears in **Approval Queue** with the full AI
-   reasoning chain (validate → fraud → cost → recommendation)
-5. **Approve** → Customer Portal status flips to **resolved** with a claim reference number
-6. Manager **Trends** tab shows updated approval rate, automation rate, total claim cost
+   reasoning chain: **policy lookup (RAG)** → validate → fraud → recommendation → cost
+5. In the reasoning detail, note the **"Policy basis"** box: the recommendation cites the
+   exact warranty clause (e.g. `SWIFT-AC-01`) it relied on, with the clause wording pulled
+   from the Policy Reference (RAG) step — so the decision is grounded, not invented
+6. **Approve** → Customer Portal status flips to **resolved** with a claim reference number
+7. Back on the Customer Portal, the concluded ticket now shows a **"How was your experience?"**
+   star rating (1–5) + optional comment → submit it (CSAT, captured once per claim)
+8. Manager **Trends** tab shows updated approval rate, automation rate, total claim cost, and
+   the new **Customer Satisfaction** KPI (average ★ + number of responses)
+
+### Show the decision is *trustworthy* (Policy RAG contrast)
+- Submit a **brake-pad** claim (*"brake pads worn out after 6 months"*) → the agent rejects it
+  and cites `GEN-WEAR-01` (wear items excluded). Compare with the AC claim above: same pipeline,
+  different cited clause — the citation is what proves the system read the actual policy.
+
+### Decision-quality eval (LLM-as-judge)
+- From `backend/` (venv active): `python -m tests.eval.run_eval`
+- Runs labeled claim scenarios through the real pipeline against the configured LLM, then an
+  LLM judge scores the *reasoning quality*. Prints a scorecard: decision accuracy, coverage
+  accuracy, and average reasoning score — how we measure quality, not just "does it run."
 
 ### Recall pipeline
 1. Login as **Admin** → **Recall Management** tab

@@ -19,6 +19,8 @@ function relTime(ts: string): string {
 
 const STATUS_DOT: Record<string, string> = {
   resolved: "dot-ok",
+  closed: "dot-ok",
+  paid: "dot-ok",
   rejected: "dot-danger",
   escalated: "dot-warn",
   awaiting_approval: "dot-info",
@@ -29,6 +31,8 @@ const STATUS_DOT: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   resolved: "text-ok bg-ok-soft border-ok/30",
+  closed: "text-ok bg-ok-soft border-ok/30",
+  paid: "text-ok bg-ok-soft border-ok/30",
   rejected: "text-danger bg-danger-soft border-danger/30",
   escalated: "text-warn bg-warn-soft border-warn/30",
   awaiting_approval: "text-techm bg-techm-soft border-techm/30",
@@ -71,7 +75,7 @@ function AlertIcon() {
 const STATUS_STEPS = [
   { keys: ["submitted", "under_review", "processing"], label: "Submitted" },
   { keys: ["awaiting_approval"], label: "Under Review" },
-  { keys: ["resolved", "rejected", "escalated"], label: "Decision Made" },
+  { keys: ["resolved", "rejected", "escalated", "closed", "paid"], label: "Decision Made" },
 ];
 
 function DetailPanel({ ticketId }: { ticketId: string }) {
@@ -100,7 +104,7 @@ function DetailPanel({ ticketId }: { ticketId: string }) {
 
   const status = ticket.status ?? "processing";
   const activeStep = STATUS_STEPS.findIndex((s) => s.keys.includes(status));
-  const isTerminal = ["resolved", "rejected", "escalated"].includes(status);
+  const isTerminal = ["resolved", "rejected", "escalated", "closed", "paid"].includes(status);
   const isAwaiting = status === "awaiting_approval";
   const isFailed = status === "failed";
   const t = ticket as Record<string, unknown>;

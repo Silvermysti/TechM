@@ -43,11 +43,13 @@ const UPLOAD_HINTS: Record<string, string | null> = {
 const STATUS_STEPS = [
   { keys: ["submitted", "under_review", "processing"], label: "Submitted" },
   { keys: ["awaiting_approval"], label: "Under Review" },
-  { keys: ["resolved", "rejected", "escalated"], label: "Decision Made" },
+  { keys: ["resolved", "rejected", "escalated", "closed", "paid"], label: "Decision Made" },
 ];
 
 const STATUS_CHIPS: Record<string, string> = {
   resolved: "border-ok/40 text-ok",
+  closed: "border-ok/40 text-ok",
+  paid: "border-ok/40 text-ok",
   rejected: "border-danger/40 text-danger",
   escalated: "border-warn/40 text-warn",
   awaiting_approval: "border-techm/40 text-techm",
@@ -204,7 +206,7 @@ function relTime(ts: string): string {
 }
 
 function dotClass(status: string): string {
-  if (status === "resolved") return "dot dot-ok";
+  if (status === "resolved" || status === "closed" || status === "paid") return "dot dot-ok";
   if (status === "rejected" || status === "failed") return "dot dot-danger";
   if (status === "escalated" || status === "awaiting_approval") return "dot dot-warn";
   return "dot dot-muted";
@@ -231,11 +233,11 @@ function CsatPrompt({ ticket }: { ticket: Ticket }) {
     );
   }
 
-  const send = async (value: number) => {
+  const send = async () => {
+    if (score < 1) return; // need a rating first
     setBusy(true);
     try {
-      await submitCsat(ticket.id, value, comment);
-      setScore(value);
+      await submitCsat(ticket.id, score, comment);
       setDone(true);
     } catch {
       setBusy(false);
@@ -250,7 +252,7 @@ function CsatPrompt({ ticket }: { ticket: Ticket }) {
           <button
             key={n}
             disabled={busy}
-            onClick={() => send(n)}
+            onClick={() => setScore(n)}
             onMouseEnter={() => setHover(n)}
             onMouseLeave={() => setHover(0)}
             aria-label={`${n} star${n > 1 ? "s" : ""}`}
@@ -269,6 +271,13 @@ function CsatPrompt({ ticket }: { ticket: Ticket }) {
         placeholder="Optional: tell us why"
         className="mt-2 w-full rounded-lg border border-line bg-base px-3 py-1.5 text-sm text-ink placeholder:text-faint focus:border-techm focus:outline-none"
       />
+      <button
+        onClick={send}
+        disabled={busy || score < 1}
+        className="mt-2 rounded-lg bg-techm px-4 py-1.5 text-sm font-medium text-white transition hover:bg-techm/90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy ? "Submitting…" : "Submit feedback"}
+      </button>
     </div>
   );
 }
@@ -298,7 +307,7 @@ function StatusTracker({ ticketId, onNew }: { ticketId: string; onNew: () => voi
 
   const status = ticket?.status ?? "submitted";
   const activeStep = STATUS_STEPS.findIndex((s) => s.keys.includes(status));
-  const isTerminal = ["resolved", "rejected", "escalated"].includes(status);
+  const isTerminal = ["resolved", "rejected", "escalated", "closed", "paid"].includes(status);
   const isFailed = status === "failed";
   const isAwaiting = status === "awaiting_approval";
 
