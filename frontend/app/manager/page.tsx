@@ -457,6 +457,16 @@ function TicketDetailPanel({
   const isEscalated = ticket.status === "escalated";
   const isActionable = isAwaiting || isEscalated;  // escalated is re-queued, not terminal
 
+  // ── Signal values for the decision cockpit tiles ──
+  const fraudRisk = traceValue(ticket.agent_trace, "Fraud Detection Specialist", "fraud_risk");
+  const fraudInfo = fraudRisk !== undefined ? fraudBand(fraudRisk) : null;
+  const estCost = traceValue(ticket.agent_trace, "Cost Estimator", "total_cost");
+  const rpOut = ticket.agent_trace?.find(
+    (s) => s.agent === "Responsible Party Specialist",
+  )?.output as
+    | { recoverable_from_supplier?: boolean; supplier_name?: string | null }
+    | undefined;
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Scrollable body */}
@@ -499,6 +509,105 @@ function TicketDetailPanel({
           </div>
         </div>
 
+        {/* ── Decision cockpit: signal tiles ── */}
+        {rec && (
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+            {/* Verdict */}
+            <div
+              className={`rounded-xl border p-3 ${
+                rec.decision === "approve"
+                  ? "border-ok/30 bg-ok-soft/20"
+                  : rec.decision === "reject"
+                  ? "border-danger/30 bg-danger-soft/20"
+                  : "border-warn/30 bg-warn-soft/20"
+              }`}
+            >
+              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                AI Verdict
+              </p>
+              <p
+                className={`mt-1.5 font-display text-lg font-bold leading-none ${
+                  DECISION_COLORS[rec.decision] ?? "text-ink"
+                }`}
+              >
+                {DECISION_ICONS[rec.decision]} {rec.decision.toUpperCase()}
+              </p>
+            </div>
+
+            {/* Confidence */}
+            <div className="rounded-xl border border-line bg-raised p-3">
+              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                Confidence
+              </p>
+              <p className="mt-1.5 font-display text-lg font-bold leading-none tabular-nums text-ink">
+                {confPct}%
+              </p>
+              <div className="conf-bar-track mt-2">
+                <div className={`conf-bar-fill ${confFill}`} style={{ width: `${confPct}%` }} />
+              </div>
+            </div>
+
+            {/* Fraud */}
+            <div className="rounded-xl border border-line bg-raised p-3">
+              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                Fraud Risk
+              </p>
+              {fraudInfo && fraudRisk !== undefined ? (
+                <>
+                  <p className="mt-1.5 font-display text-lg font-bold leading-none tabular-nums text-ink">
+                    {Math.round(fraudRisk * 100)}%
+                  </p>
+                  <span className={`mt-2 inline-block chip text-[9px] ${fraudInfo.chip}`}>
+                    {fraudInfo.label}
+                  </span>
+                </>
+              ) : (
+                <p className="mt-1.5 text-sm text-faint">—</p>
+              )}
+            </div>
+
+            {/* Cost */}
+            <div className="rounded-xl border border-line bg-raised p-3">
+              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                Est. Cost
+              </p>
+              <p className="mt-1.5 font-display text-lg font-bold leading-none tabular-nums text-ink">
+                {estCost !== undefined ? inr(estCost) : "—"}
+              </p>
+              {estCost !== undefined && estCost > AUTO_MAX_COST && (
+                <p className="mt-1.5 text-[9px] leading-tight text-warn">
+                  over {inr(AUTO_MAX_COST)} cap
+                </p>
+              )}
+            </div>
+
+            {/* Recoverable */}
+            <div className="rounded-xl border border-line bg-raised p-3">
+              <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                Recoverable
+              </p>
+              {rpOut ? (
+                <>
+                  <p
+                    className={`mt-1.5 font-display text-lg font-bold leading-none ${
+                      rpOut.recoverable_from_supplier ? "text-ok" : "text-faint"
+                    }`}
+                  >
+                    {rpOut.recoverable_from_supplier ? "✓ Yes" : "No"}
+                  </p>
+                  {rpOut.recoverable_from_supplier && rpOut.supplier_name && (
+                    <p className="mt-1.5 truncate text-[9px] text-muted">
+                      {rpOut.supplier_name}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-1.5 text-sm text-faint">—</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Why this needs you ── */}
         {isActionable && (() => {
           const reasons = whyNeedsHuman(ticket);
@@ -525,45 +634,11 @@ function TicketDetailPanel({
           );
         })()}
 
-        {/* ── AI Verdict ── */}
+        {/* ── AI Reasoning (verdict + confidence shown in the cockpit tiles above) ── */}
         {rec && (
-          <div
-            className={`rounded-xl border p-5 ${
-              rec.decision === "approve"
-                ? "border-ok/30 bg-ok-soft/20"
-                : rec.decision === "reject"
-                ? "border-danger/30 bg-danger-soft/20"
-                : "border-warn/30 bg-warn-soft/20"
-            }`}
-          >
-            <p className="eyebrow mb-3">AI Verdict</p>
-            <div className="flex items-center gap-4">
-              <span
-                className={`font-display text-3xl font-bold tracking-tight ${
-                  DECISION_COLORS[rec.decision] ?? "text-ink"
-                }`}
-              >
-                {DECISION_ICONS[rec.decision] ?? ""} {rec.decision.toUpperCase()}
-              </span>
-              <div className="flex-1 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-faint">
-                    Confidence
-                  </span>
-                  <span className="font-mono text-sm font-bold tabular-nums text-ink">
-                    {confPct}%
-                  </span>
-                </div>
-                <div className="conf-bar-track">
-                  <div
-                    className={`conf-bar-fill ${confFill}`}
-                    style={{ width: `${confPct}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <p className="mt-4 text-[13px] leading-relaxed text-muted">{rec.reasoning}</p>
+          <div className="frame card p-5">
+            <p className="eyebrow mb-3">AI Reasoning</p>
+            <p className="text-[13px] leading-relaxed text-muted">{rec.reasoning}</p>
 
             {rec.cited_clause && (
               <div className="mt-3 rounded-lg border border-line bg-raised p-3">
