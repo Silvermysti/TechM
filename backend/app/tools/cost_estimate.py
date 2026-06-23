@@ -99,12 +99,18 @@ def build_warranty_claim(
     status: str = "approved",
 ) -> WarrantyClaim:
     """Create and persist a costed WarrantyClaim (+ line items) for a ticket."""
-    costing = estimate_cost(db, component=ticket.component)
+    # Canonicalize the free-text component ("AC compressor" -> "ac") so cost and
+    # responsible-party lookups match the catalog the same way the pipeline nodes do.
+    # Without this the claim persists with zero cost and no supplier recovery.
+    from app.tools.component_map import canonical_component
+
+    component = canonical_component(ticket.component)
+    costing = estimate_cost(db, component=component)
 
     # Responsible-party determination (APQC 6.7.3.4) drives cost-recovery routing.
     from app.tools.responsible_party import determine_responsible_party
 
-    party = determine_responsible_party(db, component=ticket.component)
+    party = determine_responsible_party(db, component=component)
     supplier_id: str | None = party["supplier_id"]
     recoverable: bool = party["recoverable_from_supplier"]
 

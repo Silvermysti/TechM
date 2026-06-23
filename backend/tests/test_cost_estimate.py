@@ -104,6 +104,24 @@ def test_build_claim_creates_costed_record_with_lines(db):
     assert round(sum(ln.line_total for ln in lines), 2) == claim.total_cost
 
 
+def test_build_claim_canonicalizes_freetext_component(db):
+    # A customer's raw wording ("brake pads") must still cost and recover correctly:
+    # the builder has to canonicalize it to the catalog component ("brakes") like the
+    # pipeline does. Regression for a bug that persisted zero-cost, non-recoverable claims.
+    ticket = Ticket(vehicle_vin="VIN777", component="brake pads", domain="warranty",
+                    summary="brake pads worn", status="awaiting_approval")
+    db.add(ticket)
+    db.commit()
+
+    claim = build_warranty_claim(db, ticket, decided_by="Ops Manager")
+    db.commit()
+
+    assert claim.total_cost > 0          # cost lookup matched the canonical component
+    assert claim.parts_cost > 0
+    assert claim.supplier_recoverable is True   # brakes -> Bosch India (non-OEM)
+    assert claim.supplier_id is not None
+
+
 def test_claim_numbers_are_unique(db):
     t1 = Ticket(vehicle_vin="VINA", component="brakes", domain="warranty",
                 summary="a", status="awaiting_approval")
