@@ -1631,7 +1631,8 @@ export default function ManagerPortal() {
     }
   };
 
-  const pendingTransferCount = transfers.filter((x) => x.status === "pending").length;
+  // Owner-consented transfers awaiting the manager's final sign-off.
+  const pendingTransferCount = transfers.filter((x) => x.status === "pending_manager").length;
 
   // ── Loading guard ──
 
