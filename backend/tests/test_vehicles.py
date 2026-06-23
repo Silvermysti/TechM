@@ -8,24 +8,27 @@ from sqlalchemy import select
 
 from app.main import app
 from app.db.session import SessionLocal
-from app.models import Vehicle
+from app.models import Customer, Vehicle, VINTransferRequest
 
 client = TestClient(app)
 
 
 def _seeded_vin_not_owned_by(customer_id: str) -> str:
-    """Return a VIN from seed data that belongs to someone other than customer_id."""
+    """Return a VIN owned by a bulk-seeded customer (so it can log in with demo1234)
+    and not yet involved in any transfer — avoids cross-test ownership pollution."""
     db = SessionLocal()
     try:
-        v = db.scalars(
+        used = set(db.scalars(select(VINTransferRequest.vin)).all())
+        vehicles = db.scalars(
             select(Vehicle)
+            .join(Customer, Vehicle.customer_id == Customer.id)
+            .where(Customer.email.like("customer%@example.com"))
             .where(Vehicle.customer_id != customer_id)
-            .where(Vehicle.customer_id.isnot(None))
-            .limit(1)
-        ).first()
-        if v is None:
-            pytest.skip("No suitable seeded vehicle found")
-        return v.vin
+        ).all()
+        for v in vehicles:
+            if v.vin not in used:
+                return v.vin
+        pytest.skip("No suitable seeded vehicle found")
     finally:
         db.close()
 
@@ -120,7 +123,7 @@ def test_duplicate_transfer_request_returns_existing():
 
 
 # --------------------------------------------------------------------------- #
-# Manager transfer approval / rejection
+# helpers for the two-step (owner -> manager) approval flow
 # --------------------------------------------------------------------------- #
 
 @pytest.fixture()
@@ -130,11 +133,104 @@ def manager_headers():
     return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
+def _owner_headers_for_vin(vin: str) -> dict:
+    """Log in as the current owner of a seeded VIN (all seeded accounts use demo1234)."""
+    db = SessionLocal()
+    try:
+        owner = db.get(Customer, db.get(Vehicle, vin).customer_id)
+        email = owner.email
+    finally:
+        db.close()
+    r = client.post("/api/v1/auth/login", json={"email": email, "password": "demo1234"})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def _owner_consents(vin: str, transfer_id: str) -> None:
+    """Run the first approval step so the request reaches the manager queue."""
+    oh = _owner_headers_for_vin(vin)
+    r = client.post(f"/api/v1/vehicles/transfers/{transfer_id}/owner-approve", headers=oh)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "pending_manager"
+
+
+# --------------------------------------------------------------------------- #
+# Step 1 — current owner consent
+# --------------------------------------------------------------------------- #
+
+def test_new_transfer_awaits_owner_not_manager(manager_headers):
+    buyer = _register("Buyer Await", "buyer_await@example.com")
+    vin = _seeded_vin_not_owned_by(buyer["customer_id"])
+    tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
+                     headers=_headers(buyer["token"])).json()
+
+    # The owner sees it in their incoming list…
+    inc = client.get("/api/v1/vehicles/transfers/incoming",
+                     headers=_owner_headers_for_vin(vin)).json()
+    assert any(t["id"] == tr["transfer_id"] and t["status"] == "pending_owner" for t in inc)
+
+    # …but the manager does NOT yet (owner hasn't consented).
+    mgr = client.get("/api/v1/vehicles/transfers", headers=manager_headers).json()
+    assert all(t["id"] != tr["transfer_id"] for t in mgr)
+
+
+def test_manager_cannot_approve_before_owner_consents(manager_headers):
+    buyer = _register("Buyer Early", "buyer_early@example.com")
+    vin = _seeded_vin_not_owned_by(buyer["customer_id"])
+    tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
+                     headers=_headers(buyer["token"])).json()
+    r = client.post(f"/api/v1/vehicles/transfers/{tr['transfer_id']}/approve",
+                    headers=manager_headers)
+    assert r.status_code == 404
+
+
+def test_non_owner_cannot_consent():
+    buyer = _register("Buyer NonOwner", "buyer_nonowner@example.com")
+    vin = _seeded_vin_not_owned_by(buyer["customer_id"])
+    tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
+                     headers=_headers(buyer["token"])).json()
+    # The buyer (requester) is not the current owner — they cannot self-consent.
+    r = client.post(f"/api/v1/vehicles/transfers/{tr['transfer_id']}/owner-approve",
+                    headers=_headers(buyer["token"]))
+    assert r.status_code == 403
+
+
+def test_owner_reject_ends_request_and_keeps_ownership(manager_headers):
+    buyer = _register("Buyer OwnerRej", "buyer_ownerrej@example.com")
+    vin = _seeded_vin_not_owned_by(buyer["customer_id"])
+    db = SessionLocal()
+    try:
+        original_owner_id = db.get(Vehicle, vin).customer_id
+    finally:
+        db.close()
+
+    tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
+                     headers=_headers(buyer["token"])).json()
+    r = client.post(f"/api/v1/vehicles/transfers/{tr['transfer_id']}/owner-reject",
+                    headers=_owner_headers_for_vin(vin))
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
+
+    # Never reaches the manager, ownership unchanged.
+    mgr = client.get("/api/v1/vehicles/transfers", headers=manager_headers).json()
+    assert all(t["id"] != tr["transfer_id"] for t in mgr)
+    db = SessionLocal()
+    try:
+        assert db.get(Vehicle, vin).customer_id == original_owner_id
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------- #
+# Step 2 — manager final approval (after owner consent)
+# --------------------------------------------------------------------------- #
+
 def test_approve_transfer_flips_ownership(manager_headers):
     buyer = _register("Buyer Appr", "buyer_appr@example.com")
     vin = _seeded_vin_not_owned_by(buyer["customer_id"])
     tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
                      headers=_headers(buyer["token"])).json()
+    _owner_consents(vin, tr["transfer_id"])
 
     r = client.post(f"/api/v1/vehicles/transfers/{tr['transfer_id']}/approve",
                     headers=manager_headers)
@@ -162,6 +258,7 @@ def test_reject_transfer_leaves_original_owner(manager_headers):
 
     tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
                      headers=_headers(buyer["token"])).json()
+    _owner_consents(vin, tr["transfer_id"])
     r = client.post(f"/api/v1/vehicles/transfers/{tr['transfer_id']}/reject",
                     headers=manager_headers)
     assert r.status_code == 200
@@ -177,8 +274,9 @@ def test_reject_transfer_leaves_original_owner(manager_headers):
 def test_list_pending_transfers(manager_headers):
     buyer = _register("List Buyer", "list_buyer@example.com")
     vin = _seeded_vin_not_owned_by(buyer["customer_id"])
-    client.post("/api/v1/vehicles/claim", json={"vin": vin},
-                headers=_headers(buyer["token"]))
+    tr = client.post("/api/v1/vehicles/claim", json={"vin": vin},
+                     headers=_headers(buyer["token"])).json()
+    _owner_consents(vin, tr["transfer_id"])
 
     r = client.get("/api/v1/vehicles/transfers", headers=manager_headers)
     assert r.status_code == 200

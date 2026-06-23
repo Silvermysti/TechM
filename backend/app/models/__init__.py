@@ -80,7 +80,15 @@ class Vehicle(Base):
 
 class VINTransferRequest(Base):
     """Pending ownership transfer when a VIN is claimed by someone other than the
-    current registered owner. Approved by a manager after verifying the RC document."""
+    current registered owner.
+
+    Two-step approval: the current owner must consent FIRST (they're giving up the
+    car), then a manager does final verification of the RC document. Status walks:
+        pending_owner   -> waiting for the current owner to approve/reject
+        pending_manager -> owner consented; waiting for manager final approval
+        approved        -> manager approved; ownership has flipped
+        rejected        -> denied (by either the owner or the manager)
+    """
 
     __tablename__ = "vin_transfer_requests"
 
@@ -89,8 +97,13 @@ class VINTransferRequest(Base):
     requester_id: Mapped[str] = mapped_column(ForeignKey("customers.id"))
     current_owner_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     rc_attachment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(20), default="pending_owner")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # When the current owner gave (or refused) consent — the first approval step.
+    owner_decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The final (manager) decision.
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

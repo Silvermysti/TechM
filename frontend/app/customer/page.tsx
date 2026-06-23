@@ -6,10 +6,14 @@ import {
   API_BASE,
   claimVIN,
   getTicket,
+  listIncomingTransfers,
+  ownerApproveTransfer,
+  ownerRejectTransfer,
   sendIntake,
   submitCsat,
   uploadIntakeImage,
   type VINClaimResult,
+  type VINTransfer,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Ticket } from "@/lib/types";
@@ -466,6 +470,10 @@ export default function CustomerPortal() {
   const [vinResult, setVinResult] = useState<VINClaimResult | null>(null);
   const [vinBusy, setVinBusy] = useState(false);
   const [vinRcId, setVinRcId] = useState<string | null>(null);
+  // Transfer requests awaiting MY consent as the current owner of a vehicle.
+  const [incoming, setIncoming] = useState<VINTransfer[]>([]);
+  const [transferBusy, setTransferBusy] = useState<string | null>(null);
+
   const fileInput = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionId = useRef<string>(
@@ -478,6 +486,26 @@ export default function CustomerPortal() {
       setVin(session.vehicles[0].vin);
     }
   }, [session, vin]);
+
+  // Load any transfer requests waiting for this owner's consent.
+  const refreshIncoming = () => {
+    listIncomingTransfers().then(setIncoming).catch(() => setIncoming([]));
+  };
+  useEffect(() => {
+    if (session) refreshIncoming();
+  }, [session]);
+
+  const decideTransfer = async (id: string, approve: boolean) => {
+    setTransferBusy(id);
+    try {
+      await (approve ? ownerApproveTransfer(id) : ownerRejectTransfer(id));
+      refreshIncoming();
+    } catch {
+      // ignore — stale request; the list will refresh
+    } finally {
+      setTransferBusy(null);
+    }
+  };
 
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {
@@ -595,6 +623,55 @@ export default function CustomerPortal() {
                 Register a vehicle →
               </button>
             )}
+          </div>
+        )}
+
+        {/* Incoming transfer requests — someone wants to take over MY car.
+            The current owner must consent before a manager can finalize it. */}
+        {incoming.length > 0 && (
+          <div className="mb-6 rounded-xl border border-warn/40 bg-warn-soft/30 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">🔑</span>
+              <p className="eyebrow !mb-0 text-warn">
+                Ownership transfer — your approval needed
+              </p>
+            </div>
+            <div className="space-y-3">
+              {incoming.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] text-ink">
+                      <span className="font-semibold">{t.requester_name || "A customer"}</span>{" "}
+                      is requesting to take over your vehicle{" "}
+                      <span className="font-mono text-[11px] text-muted">{t.vin}</span>.
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-faint">
+                      If you approve, a manager does the final check before ownership moves.
+                      If you decline, the request is closed.
+                    </p>
+                  </div>
+                  <div className="flex flex-none gap-2">
+                    <button
+                      onClick={() => decideTransfer(t.id, true)}
+                      disabled={transferBusy === t.id}
+                      className="rounded-lg bg-ok px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => decideTransfer(t.id, false)}
+                      disabled={transferBusy === t.id}
+                      className="rounded-lg border border-danger/50 px-3 py-2 text-xs font-medium text-danger transition hover:bg-danger-soft disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -785,7 +862,7 @@ export default function CustomerPortal() {
                         {vinResult.status === "already_owned" &&
                           "This vehicle is already linked to your account."}
                         {vinResult.status === "transfer_requested" &&
-                          "Transfer request submitted. A manager will review your RC and approve shortly."}
+                          "Transfer request submitted. The current owner will be asked to approve first, then a manager verifies your RC and finalizes it."}
                       </span>
                     </div>
                   )}

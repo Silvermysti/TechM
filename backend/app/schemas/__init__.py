@@ -203,9 +203,11 @@ class VINTransferOut(BaseModel):
     requester_name: str
     requester_email: str
     current_owner_id: str | None = None
+    current_owner_name: str | None = None
     rc_attachment_id: str | None = None
     status: str
     requested_at: datetime
+    owner_decided_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

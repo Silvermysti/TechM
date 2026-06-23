@@ -1207,8 +1207,9 @@ function TransfersTab({
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
 }) {
-  const pending = transfers.filter((x) => x.status === "pending");
-  const resolved = transfers.filter((x) => x.status !== "pending");
+  // The manager list only returns owner-consented requests (pending_manager).
+  const pending = transfers.filter((x) => x.status === "pending_manager");
+  const resolved = transfers.filter((x) => x.status !== "pending_manager");
 
   return (
     <div className="space-y-4">
@@ -1237,12 +1238,25 @@ function TransfersTab({
                     <span className="font-mono text-base font-bold tracking-wider text-ink">
                       {tr.vin}
                     </span>
-                    <span className="chip text-[9px] border-warn/40 text-warn">pending</span>
+                    <span className="chip text-[9px] border-ok/40 text-ok">
+                      ✓ owner consented
+                    </span>
                   </div>
                   <p className="text-[13px] text-muted">
                     Requested by{" "}
                     <span className="font-medium text-ink">{tr.requester_name}</span>{" "}
                     <span className="text-faint">&lt;{tr.requester_email}&gt;</span>
+                  </p>
+                  <p className="text-[12px] text-muted">
+                    Current owner{" "}
+                    <span className="font-medium text-ink">
+                      {tr.current_owner_name ?? "—"}
+                    </span>{" "}
+                    approved
+                    {tr.owner_decided_at
+                      ? ` ${relTime(tr.owner_decided_at)}`
+                      : ""}{" "}
+                    — your final sign-off transfers ownership.
                   </p>
                   <p className="font-mono text-[10px] text-faint">
                     Submitted {relTime(tr.requested_at)} ·{" "}

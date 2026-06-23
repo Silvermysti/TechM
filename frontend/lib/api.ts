@@ -79,10 +79,12 @@ export function claimVIN(vin: string, rc_attachment_id?: string): Promise<VINCla
 
 export type VINTransfer = {
   id: string; vin: string; requester_name: string; requester_email: string;
-  current_owner_id: string | null; rc_attachment_id: string | null;
-  status: string; requested_at: string;
+  current_owner_id: string | null; current_owner_name: string | null;
+  rc_attachment_id: string | null; status: string;
+  requested_at: string; owner_decided_at: string | null;
 };
 
+// Manager: requests the owner has already consented to (status pending_manager).
 export function listTransfers(): Promise<VINTransfer[]> {
   return jsonFetch<VINTransfer[]>("/api/v1/vehicles/transfers");
 }
@@ -93,6 +95,19 @@ export function approveTransfer(id: string): Promise<VINTransfer> {
 
 export function rejectTransfer(id: string): Promise<VINTransfer> {
   return jsonFetch<VINTransfer>(`/api/v1/vehicles/transfers/${id}/reject`, { method: "POST" });
+}
+
+// Customer (current owner): requests awaiting MY consent, and my approve/reject.
+export function listIncomingTransfers(): Promise<VINTransfer[]> {
+  return jsonFetch<VINTransfer[]>("/api/v1/vehicles/transfers/incoming");
+}
+
+export function ownerApproveTransfer(id: string): Promise<VINTransfer> {
+  return jsonFetch<VINTransfer>(`/api/v1/vehicles/transfers/${id}/owner-approve`, { method: "POST" });
+}
+
+export function ownerRejectTransfer(id: string): Promise<VINTransfer> {
+  return jsonFetch<VINTransfer>(`/api/v1/vehicles/transfers/${id}/owner-reject`, { method: "POST" });
 }
 
 export function sendIntake(body: {
