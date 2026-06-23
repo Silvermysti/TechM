@@ -82,6 +82,14 @@ Domain pipelines:
 - **Tiered autonomy:** low-cost + high-confidence + low-fraud claims auto-finalize; clear
   `reject` decisions also auto-finalize (no manager needed for clean denials); everything else
   waits for a manager. Logic in `orchestrator.py` `autonomy_router`; thresholds in `config.py`.
+  The frontend mirrors these thresholds in `app/manager/page.tsx` (`AUTO_MIN_CONFIDENCE` etc.) to
+  explain *why* a claim needs a human — keep the two in sync if you change `config.py`.
+- **Two-step VIN ownership transfer** (`api/v1/vehicles.py`): claiming someone else's VIN needs the
+  **current owner's consent first**, then a manager. Status machine on `VINTransferRequest`:
+  `pending_owner` → (owner approves) `pending_manager` → (manager approves) `approved`; either party
+  can `reject`. Owner endpoints (`transfers/incoming`, `owner-approve`, `owner-reject`) are
+  customer-auth and verify the caller is the current owner; the manager list/approve only act on
+  `pending_manager`. Surfaced in the customer portal ("approval needed" panel) and the manager queue.
 - **Background execution:** `intake.py` calls `create_ticket_record()` (immediate, status=processing)
   then `background_tasks.add_task(run_ticket_graph, ticket.id)`. The pipeline runs in a separate
   thread with its own DB session (`SessionLocal()`), not the request session.
@@ -130,10 +138,19 @@ Shared: `lib/api.ts` (REST + 401 auto-redirect), `lib/auth.ts`, `lib/useSSE.ts`,
 - Uploaded files (photos + RC documents) are **private**: served only via authed
   `GET /api/v1/attachments/{id}` (manager = any; customer = own ticket only), NOT a public static
   mount. Frontend builds image URLs with `attachmentUrl(id)` (appends `?token=` for `<img>`/`<a>`).
+- **Canonicalize the component before DB lookups.** Customers type free text ("AC compressor") but the
+  catalog keys are canonical ("ac"). `classify_and_enrich` normalizes it for the pipeline, but anything
+  that re-derives cost/parts/supplier from a ticket must call `canonical_component(ticket.component)`
+  first (see `tools/cost_estimate.py` `build_warranty_claim`). Skipping this silently persists
+  zero-cost, non-recoverable claims — there's a regression test for it.
+- The manager claim detail (`app/manager/page.tsx` `TicketDetailPanel`) is a "decision cockpit": the
+  top signal tiles (verdict / confidence / fraud band / cost / recoverable) are derived from the
+  `agent_trace` steps by name (e.g. `"Fraud Detection Specialist"`, `"Cost Estimator"`,
+  `"Responsible Party Specialist"`). Renaming an agent node breaks that lookup.
 
 ## Current state
 Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWARD-PLAN.md`).
-96 tests passing, TypeScript clean.
+101 tests passing, TypeScript clean.
 - **Phase 5:** password + JWT auth with roles
 - **Phase 6:** durable LangGraph checkpointer, DB-backed intake sessions, unique claim numbers
 - **Phase 7:** notifications (`services/notify.py`), claim lifecycle (pay/close), audit API
@@ -143,8 +160,9 @@ Demo phases complete; now finishing the warranty pipeline end-to-end (see `FORWA
 - **Phase 10:** performance trends panel (`GET /api/v1/metrics`), Docker Compose (all 3 services),
   backend + frontend Dockerfiles, full README with AWS-readiness table
 - **Phase 1.6:** user self-registration (`POST /auth/register`), VIN claim flow (unknown VIN → **404**,
-  own → already_owned, other's → transfer_requested), manager approve/reject with ownership flip,
-  `VINTransferRequest` model, `GET /vehicles`, `GET /vehicles/transfers`
+  own → already_owned, other's → transfer_requested), `VINTransferRequest` model, `GET /vehicles`,
+  `GET /vehicles/transfers`. **Transfer approval is now two-step (owner consent → manager)** — see
+  the "Two-step VIN ownership transfer" key pattern above.
 - **Phase 1.7:** bulk follow-up bullets in intake agent (all missing fields in one reply, max 1
   clarifying round), contextual upload zone per category, RC + PDF upload support
 - **Phase 10 (vision):** `warranty_evidence` node — Groq vision photo assessment (`EvidenceAssessment`)
