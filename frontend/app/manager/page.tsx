@@ -91,6 +91,113 @@ function agentLabel(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// ─── Autonomy / fraud explainability ────────────────────────────────────────────
+// These thresholds MIRROR the backend's auto-approve gate in `backend/app/config.py`
+// (auto_approve_min_confidence / max_fraud / max_cost). They are the rules that decide
+// whether a claim can finalize on its own or must wait for a manager. Kept here so the
+// UI can tell the manager *why* a claim landed on their desk. If the backend values
+// change, update these to match.
+const AUTO_MIN_CONFIDENCE = 0.85; //   ≥ 85% AI confidence
+const AUTO_MAX_FRAUD = 0.15; //         ≤ 15% fraud risk
+const AUTO_MAX_COST = 15000; //         ≤ ₹15,000 repair cost
+const FRAUD_FORCE_ESCALATE = 0.7; //    > 70% fraud always goes to a human
+
+const inr = (n: number) =>
+  "₹" + Math.round(n).toLocaleString("en-IN");
+
+/** Pull a number out of a named agent-trace step's output (e.g. the fraud score). */
+function traceValue(
+  trace: AgentOutput[] | null | undefined,
+  agent: string,
+  key: string,
+): number | undefined {
+  const step = trace?.find((s) => s.agent === agent);
+  const v = step?.output?.[key];
+  return typeof v === "number" ? v : undefined;
+}
+
+/** The fraud node's written explanation, if present. */
+function fraudReasoning(trace: AgentOutput[] | null | undefined): string | undefined {
+  const step = trace?.find((s) => s.agent === "Fraud Detection Specialist");
+  const r = step?.output?.reasoning;
+  return typeof r === "string" && r.trim() ? r : undefined;
+}
+
+/** Band a 0–1 fraud score into low / medium / high using the same cut-offs the
+ *  backend uses (≤15% can auto-approve; >70% is force-escalated). */
+function fraudBand(risk: number): {
+  label: "Low" | "Medium" | "High";
+  chip: string;
+  bar: string;
+  blurb: string;
+} {
+  if (risk <= AUTO_MAX_FRAUD)
+    return {
+      label: "Low",
+      chip: "border-ok/40 bg-ok-soft text-ok",
+      bar: "bg-ok",
+      blurb: "At or below the 15% safe-to-auto-approve line.",
+    };
+  if (risk <= FRAUD_FORCE_ESCALATE)
+    return {
+      label: "Medium",
+      chip: "border-warn/40 bg-warn-soft text-warn",
+      bar: "bg-warn",
+      blurb: "Above the 15% auto-approve line, so a human reviews it.",
+    };
+  return {
+    label: "High",
+    chip: "border-danger/40 bg-danger-soft text-danger",
+    bar: "bg-danger",
+    blurb: "Above 70% — automatically escalated for senior review.",
+  };
+}
+
+/** Plain-English reasons a claim is waiting for a manager, derived from the same
+ *  gate the backend applies. Returns [] if nothing blocks auto-approval. */
+function whyNeedsHuman(ticket: Ticket): string[] {
+  const rec = ticket.recommendation;
+  const reasons: string[] = [];
+  if (!rec) return reasons;
+
+  if (rec.decision === "escalate") {
+    reasons.push(
+      "The AI was not confident enough to decide on its own and asked for a human.",
+    );
+  }
+
+  const fraud = traceValue(ticket.agent_trace, "Fraud Detection Specialist", "fraud_risk");
+  const cost = traceValue(ticket.agent_trace, "Cost Estimator", "total_cost");
+  const conf = rec.confidence ?? 0;
+
+  if (fraud !== undefined && fraud > FRAUD_FORCE_ESCALATE) {
+    reasons.push(
+      `Fraud risk is high (${Math.round(fraud * 100)}%) — claims over 70% are always sent to a human.`,
+    );
+  } else if (fraud !== undefined && fraud > AUTO_MAX_FRAUD) {
+    reasons.push(
+      `Fraud risk (${Math.round(fraud * 100)}%) is above the ${Math.round(AUTO_MAX_FRAUD * 100)}% auto-approve limit.`,
+    );
+  }
+
+  if (rec.decision !== "reject" && conf < AUTO_MIN_CONFIDENCE) {
+    reasons.push(
+      `AI confidence (${Math.round(conf * 100)}%) is below the ${Math.round(AUTO_MIN_CONFIDENCE * 100)}% bar needed to auto-approve.`,
+    );
+  }
+
+  if (cost !== undefined && cost > AUTO_MAX_COST) {
+    reasons.push(
+      `Repair cost (${inr(cost)}) is above the ${inr(AUTO_MAX_COST)} auto-approve cap.`,
+    );
+  }
+
+  if (reasons.length === 0) {
+    reasons.push("This claim type always requires a manager sign-off.");
+  }
+  return reasons;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function FieldValue({ name, value }: { name: string; value: unknown }) {
@@ -392,6 +499,32 @@ function TicketDetailPanel({
           </div>
         </div>
 
+        {/* ── Why this needs you ── */}
+        {isActionable && (() => {
+          const reasons = whyNeedsHuman(ticket);
+          return (
+            <div className="rounded-xl border border-techm/30 bg-techm-soft/30 p-5">
+              <div className="flex items-center gap-2">
+                <span className="text-base text-techm">👤</span>
+                <p className="eyebrow !mb-0 text-techm">Why this needs your decision</p>
+              </div>
+              <ul className="mt-3 space-y-2">
+                {reasons.map((r, i) => (
+                  <li key={i} className="flex gap-2 text-[13px] leading-relaxed text-ink">
+                    <span className="mt-[2px] text-techm">•</span>
+                    <span>{r}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[11px] leading-relaxed text-faint">
+                Claims auto-approve only when confidence ≥ {Math.round(AUTO_MIN_CONFIDENCE * 100)}%,
+                fraud ≤ {Math.round(AUTO_MAX_FRAUD * 100)}%, and cost ≤ {inr(AUTO_MAX_COST)}.
+                Anything outside those limits comes to you.
+              </p>
+            </div>
+          );
+        })()}
+
         {/* ── AI Verdict ── */}
         {rec && (
           <div
@@ -481,6 +614,58 @@ function TicketDetailPanel({
             )}
           </div>
         )}
+
+        {/* ── Fraud Check ── */}
+        {(() => {
+          const fraud = traceValue(
+            ticket.agent_trace, "Fraud Detection Specialist", "fraud_risk",
+          );
+          if (fraud === undefined) return null;
+          const pct = Math.round(fraud * 100);
+          const band = fraudBand(fraud);
+          const reasoning = fraudReasoning(ticket.agent_trace);
+          return (
+            <div className="frame card p-5">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow !mb-0">Fraud Check</p>
+                <span className={`chip text-[10px] ${band.chip}`}>
+                  {band.label} risk
+                </span>
+              </div>
+              <div className="mt-3 flex items-center gap-4">
+                <span className="font-display text-3xl font-bold tabular-nums text-ink">
+                  {pct}%
+                </span>
+                <div className="flex-1">
+                  <div className="conf-bar-track">
+                    <div
+                      className={`conf-bar-fill ${band.bar}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-faint">
+                    {band.blurb}
+                  </p>
+                </div>
+              </div>
+              {/* The scale that defines the bands, so "Medium" isn't a mystery. */}
+              <div className="mt-3 flex gap-1.5 text-[9px] font-mono uppercase tracking-wider">
+                <span className="flex-1 rounded bg-ok-soft py-1 text-center text-ok">
+                  Low 0–{Math.round(AUTO_MAX_FRAUD * 100)}%
+                </span>
+                <span className="flex-1 rounded bg-warn-soft py-1 text-center text-warn">
+                  Med {Math.round(AUTO_MAX_FRAUD * 100)}–{Math.round(FRAUD_FORCE_ESCALATE * 100)}%
+                </span>
+                <span className="flex-1 rounded bg-danger-soft py-1 text-center text-danger">
+                  High {Math.round(FRAUD_FORCE_ESCALATE * 100)}–100%
+                </span>
+              </div>
+              {reasoning && (
+                <p className="mt-3 text-[13px] leading-relaxed text-muted">{reasoning}</p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── Claim ── */}
         {ticket.claim_id && (
@@ -1451,22 +1636,12 @@ export default function ManagerPortal() {
 
   return (
     <Shell title="Manager Command Center" session={session}>
-      <div className="rise flex flex-col gap-5">
-        {/* ── KPI Strip ── */}
-        <div className="grid grid-cols-3 gap-2.5 lg:grid-cols-6">
-          {/* Total */}
-          <div className="card relative overflow-hidden px-4 py-3">
-            <span className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-techm to-transparent" />
-            <p className="eyebrow">Total</p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums text-ink leading-none">
-              {tickets.length}
-            </p>
-            <p className="mt-1 text-[10px] text-faint">all time</p>
-          </div>
-
-          {/* Awaiting */}
+      <div className="rise flex flex-col gap-6">
+        {/* ── KPI Strip — four focused metrics, Awaiting first ── */}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {/* Awaiting — the manager's primary signal */}
           <div
-            className={`card relative overflow-hidden px-4 py-3 transition ${
+            className={`card relative overflow-hidden px-5 py-4 transition ${
               queue.length > 0
                 ? "border-techm/50 shadow-[0_0_0_1px_var(--techm-soft),var(--shadow)]"
                 : ""
@@ -1479,58 +1654,50 @@ export default function ManagerPortal() {
             />
             <p className={`eyebrow ${queue.length > 0 ? "text-techm" : ""}`}>Awaiting</p>
             <p
-              className={`mt-1.5 font-display text-2xl font-bold tabular-nums leading-none ${
+              className={`mt-2 font-display text-3xl font-bold tabular-nums leading-none ${
                 queue.length > 0 ? "text-techm" : "text-ink"
               }`}
             >
               {queue.length}
             </p>
-            <p className="mt-1 text-[10px] text-faint">needs decision</p>
+            <p className="mt-1.5 text-[10px] text-faint">needs your decision</p>
           </div>
 
-          {/* Auto-approved */}
-          <div className="card relative overflow-hidden px-4 py-3">
-            <span className="absolute inset-x-0 top-0 h-[3px] bg-ok/60" />
-            <p className="eyebrow">Auto-approved</p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums leading-none text-ink">
-              {autoApproved}
+          {/* Total */}
+          <div className="card relative overflow-hidden px-5 py-4">
+            <span className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-techm to-transparent" />
+            <p className="eyebrow">Total claims</p>
+            <p className="mt-2 font-display text-3xl font-bold tabular-nums text-ink leading-none">
+              {tickets.length}
             </p>
-            <p className="mt-1 text-[10px] text-faint">no human needed</p>
+            <p className="mt-1.5 text-[10px] text-faint">all time</p>
           </div>
 
-          {/* Human-approved */}
-          <div className="card relative overflow-hidden px-4 py-3">
+          {/* Approved — auto + manager combined, with the split as context */}
+          <div className="card relative overflow-hidden px-5 py-4">
             <span className="absolute inset-x-0 top-0 h-[3px] bg-ok" />
-            <p className="eyebrow text-ok">Human-approved</p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums leading-none text-ok">
+            <p className="eyebrow text-ok">Approved</p>
+            <p className="mt-2 font-display text-3xl font-bold tabular-nums leading-none text-ok">
               {humanApproved}
             </p>
-            <p className="mt-1 text-[10px] text-faint">by manager</p>
-          </div>
-
-          {/* Rejected */}
-          <div className="card relative overflow-hidden px-4 py-3">
-            <span className="absolute inset-x-0 top-0 h-[3px] bg-danger/60" />
-            <p className="eyebrow">Rejected</p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums leading-none text-ink">
-              {rejected}
+            <p className="mt-1.5 text-[10px] text-faint">
+              {autoApproved} auto · {Math.max(humanApproved - autoApproved, 0)} by manager
             </p>
-            <p className="mt-1 text-[10px] text-faint">declined</p>
           </div>
 
           {/* Avg confidence */}
-          <div className="card relative overflow-hidden px-4 py-3">
+          <div className="card relative overflow-hidden px-5 py-4">
             <span className="absolute inset-x-0 top-0 h-[3px] bg-info/60" />
             <p className="eyebrow">Avg Confidence</p>
-            <p className="mt-1.5 font-display text-2xl font-bold tabular-nums leading-none text-ink">
+            <p className="mt-2 font-display text-3xl font-bold tabular-nums leading-none text-ink">
               {avgConf}%
             </p>
-            <p className="mt-1 text-[10px] text-faint">AI certainty</p>
+            <p className="mt-1.5 text-[10px] text-faint">AI certainty</p>
           </div>
         </div>
 
         {/* ── Tab Bar ── */}
-        <div className="flex items-end gap-0 border-b border-line">
+        <div className="no-scrollbar flex items-end gap-1 overflow-x-auto border-b border-line">
           {(["queue", "monitor", "trends", "transfers", "recovery", "audit"] as const).map((t) => {
             const LABELS: Record<string, string> = {
               queue:     "Approval Queue",
