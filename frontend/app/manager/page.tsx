@@ -667,6 +667,81 @@ function TicketDetailPanel({
           );
         })()}
 
+        {/* ── Supplier Cost Recovery ── */}
+        {(() => {
+          const step = ticket.agent_trace?.find(
+            (s) => s.agent === "Responsible Party Specialist",
+          );
+          const rp = step?.output as
+            | {
+                party?: string;
+                recoverable_from_supplier?: boolean;
+                supplier_name?: string | null;
+                is_oem?: boolean | null;
+                reasoning?: string;
+              }
+            | undefined;
+          if (!rp) return null;
+          const recoverable = Boolean(rp.recoverable_from_supplier);
+          const concluded = !isAwaiting && !isEscalated;
+          return (
+            <div className="frame card p-5">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow !mb-0">Supplier Cost Recovery</p>
+                <span
+                  className={`chip text-[10px] ${
+                    recoverable
+                      ? "border-ok/40 bg-ok-soft text-ok"
+                      : "border-line text-faint"
+                  }`}
+                >
+                  {recoverable ? "✓ Recoverable" : "Not recoverable"}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-line bg-raised p-3">
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                    Cost borne by
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold capitalize text-ink">
+                    {rp.party ?? "—"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-line bg-raised p-3">
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-faint">
+                    Supplier
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold text-ink">
+                    {rp.supplier_name ?? "—"}
+                    {rp.is_oem != null && rp.supplier_name && (
+                      <span className="ml-1.5 font-normal text-faint">
+                        ({rp.is_oem ? "OEM" : "non-OEM"})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {rp.reasoning && (
+                <p className="mt-3 text-[13px] leading-relaxed text-muted">
+                  {rp.reasoning}
+                </p>
+              )}
+
+              {recoverable && (
+                <div className="mt-3 rounded-lg border border-techm/30 bg-techm-soft/20 p-3">
+                  <p className="text-[12px] leading-relaxed text-techm">
+                    {concluded
+                      ? "✎ A recovery draft is ready to generate in the Supplier Recovery tab."
+                      : "✎ Draft recovery email coming soon — it becomes available in the Supplier Recovery tab once you approve this claim."}
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* ── Claim ── */}
         {ticket.claim_id && (
           <ClaimPanel claimId={ticket.claim_id} onUpdate={onClaimUpdate} />
@@ -1386,9 +1461,15 @@ function RecoveryTab() {
         <p className="eyebrow">Recoverable Claims — awaiting recovery action</p>
         {eligible.length === 0 ? (
           <div className="card flex flex-col items-center justify-center gap-2 py-10 text-center">
-            <span className="text-2xl text-faint">✓</span>
-            <p className="text-sm text-faint">
-              No claims awaiting supplier recovery.
+            <span className="text-2xl text-faint">📦</span>
+            <p className="text-sm font-medium text-muted">
+              No claims awaiting supplier recovery yet.
+            </p>
+            <p className="max-w-md text-[12px] leading-relaxed text-faint">
+              A claim appears here after you <span className="text-muted">approve a warranty claim</span>{" "}
+              whose faulty part came from an external (non-OEM) supplier. Then you can
+              generate a recovery draft, send it, and mark it recovered — the amount feeds
+              the “Recovered” figure in Trends.
             </p>
           </div>
         ) : (
@@ -1415,9 +1496,16 @@ function RecoveryTab() {
               <button
                 disabled={busy === c.id}
                 onClick={() => act(c.id, () => generateRecovery(c.id))}
-                className="rounded-xl border border-techm/40 bg-techm-soft/40 px-4 py-2 text-xs font-bold text-techm transition hover:bg-techm/10 disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl border border-techm/40 bg-techm-soft/40 px-4 py-2 text-xs font-bold text-techm transition hover:bg-techm/10 disabled:opacity-60"
               >
-                ✎ Generate Recovery Draft
+                {busy === c.id ? (
+                  <>
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-techm/30 border-t-techm" />
+                    Preparing draft…
+                  </>
+                ) : (
+                  "✎ Generate Recovery Draft"
+                )}
               </button>
             </div>
           ))
