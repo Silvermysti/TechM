@@ -1755,10 +1755,84 @@ export default function ManagerPortal() {
         {/* ── Tab Content ── */}
 
         {tab === "queue" && (
-          <div
-            className="flex overflow-hidden rounded-2xl border border-line bg-surface"
-            style={{ height: "calc(100vh - 18rem)" }}
-          >
+          <div className="space-y-4">
+            {/* Pending ownership transfers — surfaced in the main queue so they
+                aren't buried in a separate tab and missed. */}
+            {pendingTransferCount > 0 && (
+              <div className="rounded-2xl border border-warn/40 bg-warn-soft/20 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="text-base">🔑</span>
+                  <p className="eyebrow !mb-0 text-warn">
+                    Ownership transfers awaiting your approval
+                  </p>
+                  <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-warn px-1.5 font-mono text-[10px] font-bold text-white">
+                    {pendingTransferCount}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {transfers
+                    .filter((x) => x.status === "pending_manager")
+                    .map((tr) => (
+                      <div
+                        key={tr.id}
+                        className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm font-bold tracking-wider text-ink">
+                              {tr.vin}
+                            </span>
+                            <span className="chip text-[9px] border-ok/40 text-ok">
+                              ✓ owner consented
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[12px] text-muted">
+                            <span className="font-medium text-ink">{tr.requester_name}</span>{" "}
+                            is taking over from{" "}
+                            <span className="font-medium text-ink">
+                              {tr.current_owner_name ?? "—"}
+                            </span>
+                            {tr.rc_attachment_id && (
+                              <>
+                                {" · "}
+                                <a
+                                  href={attachmentUrl(tr.rc_attachment_id)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-techm underline underline-offset-2 hover:text-techm-deep"
+                                >
+                                  View RC
+                                </a>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex flex-none gap-2">
+                          <button
+                            onClick={() => handleApproveTransfer(tr.id)}
+                            disabled={transferBusy === tr.id}
+                            className="rounded-lg border border-ok/40 bg-ok-soft px-3 py-2 text-xs font-bold text-ok transition hover:bg-ok/10 disabled:opacity-50"
+                          >
+                            ✓ Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectTransfer(tr.id)}
+                            disabled={transferBusy === tr.id}
+                            className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-xs font-bold text-danger transition hover:bg-danger/10 disabled:opacity-50"
+                          >
+                            ✕ Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            <div
+              className="flex overflow-hidden rounded-2xl border border-line bg-surface"
+              style={{ height: "calc(100vh - 18rem)" }}
+            >
             {/* ── Left: Ticket List ── */}
             <div className="flex w-80 flex-none flex-col border-r border-line">
               {/* Search + filter */}
@@ -1908,6 +1982,7 @@ export default function ManagerPortal() {
                   </div>
                 </div>
               )}
+            </div>
             </div>
           </div>
         )}
