@@ -225,8 +225,10 @@ export default function MyRequestsPage() {
   const refresh = useCallback(async () => {
     if (!session?.customer_id) return;
     try {
-      const all = await listTickets();
-      const mine = all.filter((t) => t.customer_id === session.customer_id);
+      // The backend already scopes /tickets to the logged-in customer, and the
+      // customer view (CustomerTicketOut) has no customer_id to filter on — so use
+      // the list as-is. (Filtering on t.customer_id silently returned nothing.)
+      const mine = await listTickets();
       setTickets(mine);
       if (!selected && mine.length > 0) setSelected(mine[0].id);
     } catch { /* ignore */ }
