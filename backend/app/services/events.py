@@ -2,22 +2,27 @@
 
 Events are buffered per ticket so a client that connects *after* the run completes
 still replays the full trace (important when the graph finishes before the browser
-tab opens). Buffer capped at MAX_HISTORY entries per ticket.
+tab opens). Two caps keep memory bounded over a long-running server:
+  * MAX_HISTORY  — events kept per ticket.
+  * MAX_TICKETS  — how many tickets' histories we retain at once; once exceeded we
+    drop the oldest *finished* ticket (one with no live subscriber).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 100
+MAX_TICKETS = 500
 
 _loop: asyncio.AbstractEventLoop | None = None
 _subs: dict[str, list[asyncio.Queue]] = defaultdict(list)
-_history: dict[str, list[dict]] = defaultdict(list)
+# Ordered by first-seen so we can evict the oldest ticket when over capacity.
+_history: "OrderedDict[str, list[dict]]" = OrderedDict()
 
 
 def set_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -25,12 +30,30 @@ def set_loop(loop: asyncio.AbstractEventLoop) -> None:
     _loop = loop
 
 
+def _evict_if_needed() -> None:
+    """Keep at most MAX_TICKETS histories. Never drop a ticket that still has a live
+    subscriber (its stream would lose replayed context mid-flight)."""
+    while len(_history) > MAX_TICKETS:
+        for tid in _history:  # oldest first
+            if not _subs.get(tid):
+                del _history[tid]
+                break
+        else:
+            break  # every retained ticket has an active subscriber — stop evicting
+
+
 def publish(ticket_id: str, event_type: str, data: dict | None = None) -> None:
     """Emit an event. Safe to call from a sync background thread."""
     event = {"type": event_type, **(data or {})}
-    _history[ticket_id].append(event)
-    if len(_history[ticket_id]) > MAX_HISTORY:
-        _history[ticket_id] = _history[ticket_id][-MAX_HISTORY:]
+    hist = _history.get(ticket_id)
+    if hist is None:
+        hist = []
+        _history[ticket_id] = hist
+        _evict_if_needed()
+    _history.move_to_end(ticket_id)  # mark as most-recently active
+    hist.append(event)
+    if len(hist) > MAX_HISTORY:
+        del hist[:-MAX_HISTORY]
 
     if not _loop:
         return

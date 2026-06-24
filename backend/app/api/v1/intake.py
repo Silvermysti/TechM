@@ -61,6 +61,13 @@ async def upload_evidence(
     principal: Principal = Depends(get_current_principal),
 ) -> Attachment:
     """Store one evidence photo for an intake chat session."""
+    # If this chat session already exists, it must belong to the caller — otherwise a
+    # user could attach a file to someone else's in-progress claim. (New sessions that
+    # don't exist yet are fine: only their owner can later turn them into a ticket.)
+    existing = db.get(IntakeSession, session_id)
+    if existing is not None and existing.customer_id != principal.customer_id:
+        raise HTTPException(status_code=403, detail="Session belongs to another user.")
+
     ct = file.content_type or ""
     if not (ct.startswith("image/") or ct == "application/pdf"):
         raise HTTPException(status_code=400, detail="Only images and PDFs are accepted.")

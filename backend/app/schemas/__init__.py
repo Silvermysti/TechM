@@ -6,10 +6,16 @@ is constrained to return exactly these shapes.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Basic "looks like an email" shape: something@something.something with no spaces.
+# Deliberately lenient (we don't verify deliverability) and dependency-free — using
+# pydantic's EmailStr would require the email-validator package at runtime.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # --------------------------------------------------------------------------- #
 # LLM decision objects (structured output)
@@ -123,10 +129,18 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, description="customer's display name")
     email: str
-    password: str
+    password: str = Field(min_length=8, description="at least 8 characters")
     phone: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, v: str) -> str:
+        cleaned = v.strip().lower()
+        if not _EMAIL_RE.match(cleaned):
+            raise ValueError("Please enter a valid email address.")
+        return cleaned
 
 
 class VehicleOut(BaseModel):

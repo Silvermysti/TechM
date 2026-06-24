@@ -17,7 +17,9 @@ from app.db.session import create_all
 async def lifespan(app: FastAPI):
     import asyncio
     from app.services.events import set_loop
-    set_loop(asyncio.get_event_loop())
+    # We're inside the running loop here, so get_running_loop() is correct
+    # (get_event_loop() is deprecated for this in newer Python).
+    set_loop(asyncio.get_running_loop())
     create_all()
     yield
 

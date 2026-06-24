@@ -168,6 +168,28 @@ log, claims API. LLM calls are monkeypatched so tests run offline and fast.
 
 ---
 
+## Known limitations / production hardening
+
+This is a demo. A few things are deliberately simple and would be tightened before any
+real deployment:
+
+- **Auth token storage.** The login token is kept in the browser's `localStorage` and
+  passed as a `?token=` query param for image/SSE requests (an `<img>`/`EventSource`
+  can't send an `Authorization` header). In production, move to an httpOnly cookie so
+  page scripts can't read the token, and avoid tokens in URLs (they can land in logs).
+- **JWT secret.** `JWT_SECRET` defaults to a known dev value; it **must** be set to a
+  long random value in any real environment, or tokens could be forged.
+- **Single-process background work.** Claim pipelines run via FastAPI `BackgroundTasks`
+  in the same process; if it restarts mid-run, a ticket can be left in `processing`.
+  Production would use a real queue/worker (see the AWS-readiness map).
+- **SSE bus is in-memory.** `services/events.py` keeps recent events in process memory
+  (now capped — see `MAX_TICKETS`). A multi-instance deployment needs a shared bus
+  (SQS / API Gateway WebSockets).
+- **LLM JSON parsing has no retry.** A malformed model response fails that one ticket
+  rather than retrying. Fine for a demo; worth a retry/repair step in production.
+
+---
+
 ## Layout
 
 ```

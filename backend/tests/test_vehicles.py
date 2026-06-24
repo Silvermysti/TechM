@@ -60,8 +60,23 @@ def test_register_duplicate_email():
     _register("First", "dup_email@example.com")
     r = client.post("/api/v1/auth/register",
                     json={"name": "Second", "email": "dup_email@example.com",
-                          "password": "pass"})
+                          "password": "password8"})
     assert r.status_code == 409
+
+
+def test_register_rejects_short_password():
+    # 422 = the request body failed validation before any business logic ran.
+    r = client.post("/api/v1/auth/register",
+                    json={"name": "Shorty", "email": "shorty@example.com",
+                          "password": "short"})
+    assert r.status_code == 422
+
+
+def test_register_rejects_invalid_email():
+    r = client.post("/api/v1/auth/register",
+                    json={"name": "No At", "email": "not-an-email",
+                          "password": "longenough1"})
+    assert r.status_code == 422
 
 
 def test_registered_user_can_login():

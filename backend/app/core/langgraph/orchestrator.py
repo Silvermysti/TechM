@@ -3,9 +3,10 @@
 Flow:  enrich -> route_to_domain -> [warranty pipeline | stub] -> await_human -> finalize
 
 Human-in-the-loop is structural: `await_human` calls `interrupt()`, so nothing
-high-stakes finalizes without a human decision. State is persisted by a checkpointer
-(InMemorySaver for dev — survives across requests within the running server; swap to
-PostgresSaver for multi-instance/durable runs).
+high-stakes finalizes without a human decision. State is persisted by a durable
+checkpointer (see services/checkpoint.py): a sidecar SQLite file for a sqlite
+DATABASE_URL, or PostgresSaver for Postgres — so paused threads survive a server
+restart and are visible across worker processes.
 """
 
 from __future__ import annotations
